@@ -1,0 +1,6 @@
+flask
+flask-cors
+python-dotenv
+delta-rest-client
+requests
+websocket-client

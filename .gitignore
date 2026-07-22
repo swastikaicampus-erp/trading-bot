@@ -1,0 +1,8 @@
+venv/
+__pycache__/
+.env
+*.pyc
+delta_product_ids.json
+delta_product_info.json
+delta_strategy_trades.json
+watchlist.json
