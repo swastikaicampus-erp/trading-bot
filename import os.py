@@ -3,12 +3,10 @@ import json
 import time
 import hmac
 import hashlib
-import socket
 import threading
 from email.utils import parsedate_to_datetime
 
 import requests
-import urllib3.util.connection as urllib3_conn
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -16,24 +14,6 @@ from delta_rest_client import DeltaRestClient
 
 from market_data import MarketDataFeed, discover_perpetual_futures_symbols
 from strategy import StrategyManager
-
-# ---------------------------------------------------------------------
-# IPv4-only enforcement (permanent fix for the overnight ENTRY_FAILED
-# issue). Root cause: the ISP/hosting provider periodically renumbers
-# the server's IPv6 prefix (DHCPv6 lease renewal / SLAAC re-announce)
-# without a reboot, so any outbound call that happened to pick IPv6
-# started leaving from an address that was never whitelisted on Delta.
-# The IPv4 address (eth0) never changes, so we simply stop urllib3 from
-# ever trying IPv6 in the first place. This is patched once, globally,
-# before anything else runs -- it affects every `requests` call in this
-# file AND everything delta_rest_client does internally, since that
-# library itself is built on top of requests/urllib3.
-# ---------------------------------------------------------------------
-def _force_ipv4_only():
-    return socket.AF_INET
-
-
-urllib3_conn.allowed_gai_family = _force_ipv4_only
 
 load_dotenv()
 

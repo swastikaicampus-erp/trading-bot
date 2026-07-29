@@ -1,0 +1,1106 @@
+Microsoft Windows [Version 10.0.26200.8737]
+(c) Microsoft Corporation. All rights reserved.
+
+C:\Users\hp pc>ssh root@187.127.130.77
+ssh: connect to host 187.127.130.77 port 22: Connection timed out
+
+C:\Users\hp pc>ssh root@187.127.130.77
+root@187.127.130.77's password:
+Welcome to Ubuntu 22.04.5 LTS (GNU/Linux 5.15.0-181-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+
+ System information as of Wed Jul 22 18:01:06 UTC 2026
+
+  System load:  0.02              Processes:             118
+  Usage of /:   4.5% of 96.73GB   Users logged in:       0
+  Memory usage: 12%               IPv4 address for eth0: 187.127.130.77
+  Swap usage:   0%                IPv6 address for eth0: 2a02:4780:63:76af::1
+
+ * Strictly confined Kubernetes makes edge and IoT secure. Learn how MicroK8s
+   just raised the bar for easy, resilient and secure K8s cluster deployment.
+
+   https://ubuntu.com/engage/secure-kubernetes-at-the-edge
+
+Expanded Security Maintenance for Applications is not enabled.
+
+18 updates can be applied immediately.
+2 of these updates are standard security updates.
+To see these additional updates run: apt list --upgradable
+
+11 additional security updates can be applied with ESM Apps.
+Learn more about enabling ESM Apps service at https://ubuntu.com/esm
+
+
+*** System restart required ***
+Last login: Fri Jul 10 16:13:46 2026 from 152.59.30.179
+root@srv1489298:~# sudo ss -tulpn | grep LISTEN
+tcp   LISTEN 0      4096       127.0.0.1:65529      0.0.0.0:*    users:(("monarx-agent",pid=153827,fd=19))                                                                                                                                                                                                                                                              
+tcp   LISTEN 0      151        127.0.0.1:3306       0.0.0.0:*    users:(("mysqld",pid=31198,fd=23))                                                                                                                                                                                                                                                                     
+tcp   LISTEN 0      4096   127.0.0.53%lo:53         0.0.0.0:*    users:(("systemd-resolve",pid=590,fd=14))                                                                                                                                                                                                                                                              
+tcp   LISTEN 0      128          0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=137672,fd=3))                                                                                                                                                                                                                                                                       
+tcp   LISTEN 0      70         127.0.0.1:33060      0.0.0.0:*    users:(("mysqld",pid=31198,fd=21))                                                                                                                                                                                                                                                                     
+tcp   LISTEN 0      511                *:3005             *:*    users:(("next-server (v1",pid=117636,fd=18))                                                                                                                                                                                                                                                           
+tcp   LISTEN 0      511                *:443              *:*    users:(("apache2",pid=194836,fd=6),("apache2",pid=194835,fd=6),("apache2",pid=194834,fd=6),("apache2",pid=193826,fd=6),("apache2",pid=193545,fd=6),("apache2",pid=193109,fd=6),("apache2",pid=193043,fd=6),("apache2",pid=192501,fd=6),("apache2",pid=192184,fd=6),("apache2",pid=191916,fd=6),("apache2",pid=182627,fd=6))
+tcp   LISTEN 0      128             [::]:22            [::]:*    users:(("sshd",pid=137672,fd=4))                                                                                                                                                                                                                                                                       
+tcp   LISTEN 0      511                *:80               *:*    users:(("apache2",pid=194836,fd=4),("apache2",pid=194835,fd=4),("apache2",pid=194834,fd=4),("apache2",pid=193826,fd=4),("apache2",pid=193545,fd=4),("apache2",pid=193109,fd=4),("apache2",pid=193043,fd=4),("apache2",pid=192501,fd=4),("apache2",pid=192184,fd=4),("apache2",pid=191916,fd=4),("apache2",pid=182627,fd=4))
+root@srv1489298:~# sudo systemctl list-units --type=service --state=running
+  UNIT                        LOAD   ACTIVE SUB     DESCRIPTION
+  apache2.service             loaded active running The Apache HTTP Server
+  cron.service                loaded active running Regular background program processing daemon
+  dbus.service                loaded active running D-Bus System Message Bus
+  getty@tty1.service          loaded active running Getty on tty1
+  irqbalance.service          loaded active running irqbalance daemon
+  monarx-agent.service        loaded active running Monarx Agent - Security Scanner
+  multipathd.service          loaded active running Device-Mapper Multipath Device Controller
+  mysql.service               loaded active running MySQL Community Server
+  networkd-dispatcher.service loaded active running Dispatcher daemon for systemd-networkd
+  packagekit.service          loaded active running PackageKit Daemon
+  pm2-root.service            loaded active running PM2 process manager
+  polkit.service              loaded active running Authorization Manager
+  qemu-guest-agent.service    loaded active running QEMU Guest Agent
+  rsyslog.service             loaded active running System Logging Service
+  serial-getty@ttyS0.service  loaded active running Serial Getty on ttyS0
+  snapd.service               loaded active running Snap Daemon
+  ssh.service                 loaded active running OpenBSD Secure Shell server
+  systemd-journald.service    loaded active running Journal Service
+  systemd-logind.service      loaded active running User Login Management
+  systemd-networkd.service    loaded active running Network Configuration
+  systemd-resolved.service    loaded active running Network Name Resolution
+  systemd-timesyncd.service   loaded active running Network Time Synchronization
+  systemd-udevd.service       loaded active running Rule-based Manager for Device Events and Files
+  unattended-upgrades.service loaded active running Unattended Upgrades Shutdown
+  user@0.service              loaded active running User Manager for UID 0
+
+LOAD   = Reflects whether the unit definition was properly loaded.
+ACTIVE = The high-level unit activation state, i.e. generalization of SUB.
+
+root@srv1489298:~# ls -la /etc/nginx/sites-enabled/
+total 8
+drwxr-xr-x 2 root root 4096 Jun 17 18:07 .
+drwxr-xr-x 8 root root 4096 Jul 21 06:23 ..
+lrwxrwxrwx 1 root root   35 Jun 17 18:07 frontend -> /etc/nginx/sites-available/frontend
+root@srv1489298:~# pm2 list
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 0  │ elixirgold_fronte… │ fork     │ 13   │ online    │ 0%       │ 89.1mb   │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+root@srv1489298:~# cd /var/www
+mkdir delta-service
+cd delta-service
+git clone https://github.com/swastikaicampus-erp/trading-bot.git .
+Cloning into '.'...
+Username for 'https://github.com': git clone https://github.com/swastikaicampus-erp/trading-bot.git .
+Password for 'https://git%20clone%20https%3A%2F%2Fgithub.com%2Fswastikaicampus-erp%2Ftrading-bot.git%20.@github.com':
+[1]+  Stopped                 git clone https://github.com/swastikaicampus-erp/trading-bot.git .
+root@srv1489298:/var/www/delta-service# https://github.com/swastikaicampus-erp/trading-bot.git
+-bash: https://github.com/swastikaicampus-erp/trading-bot.git: No such file or directory
+root@srv1489298:/var/www/delta-service# https://github.com/swastikaicampus-erp/trading-bot.git
+-bash: https://github.com/swastikaicampus-erp/trading-bot.git: No such file or directory
+root@srv1489298:/var/www/delta-service# https://github.com/swastikaicampus-erp/trading-bot.git
+-bash: https://github.com/swastikaicampus-erp/trading-bot.git: No such file or directory
+root@srv1489298:/var/www/delta-service# kill %1
+
+[1]+  Stopped                 git clone https://github.com/swastikaicampus-erp/trading-bot.git .
+root@srv1489298:/var/www/delta-service# cd /var/www/delta-service
+ls -la
+rm -rf .git *   # sirf agar koi partial files/folders bane hain, warna skip karo
+
+[1]+  Stopped                 git clone https://github.com/swastikaicampus-erp/trading-bot.git .
+total 12
+drwxr-xr-x 3 root root 4096 Jul 22 18:03 .
+drwxr-xr-x 5 root root 4096 Jul 22 18:03 ..
+drwxr-xr-x 7 root root 4096 Jul 22 18:03 .git
+root@srv1489298:/var/www/delta-service# cd /var/www/delta-service
+git clone https://github.com/swastikaicampus-erp/trading-bot.git .
+Cloning into '.'...
+remote: Enumerating objects: 8, done.
+remote: Counting objects: 100% (8/8), done.
+remote: Compressing objects: 100% (8/8), done.
+remote: Total 8 (delta 0), reused 8 (delta 0), pack-reused 0 (from 0)
+Receiving objects: 100% (8/8), 25.81 KiB | 4.30 MiB/s, done.
+root@srv1489298:/var/www/delta-service# cd /var/www/delta-service
+ls -la
+total 120
+drwxr-xr-x 3 root root  4096 Jul 22 18:08 .
+drwxr-xr-x 5 root root  4096 Jul 22 18:03 ..
+drwxr-xr-x 8 root root  4096 Jul 22 18:08 .git
+-rw-r--r-- 1 root root   118 Jul 22 18:08 .gitignore
+-rw-r--r-- 1 root root 40825 Jul 22 18:08 app.py
+-rw-r--r-- 1 root root 12418 Jul 22 18:08 market_data.py
+-rw-r--r-- 1 root root    74 Jul 22 18:08 requirements.txt
+-rw-r--r-- 1 root root 32022 Jul 22 18:08 strategy.py
+-rw-r--r-- 1 root root 11921 Jul 22 18:08 websocket_feed.py
+root@srv1489298:/var/www/delta-service# python3 --version
+pip3 --version
+Python 3.10.12
+Command 'pip3' not found, but can be installed with:
+apt install python3-pip
+root@srv1489298:/var/www/delta-service# python3 -m venv venv
+The virtual environment was not created successfully because ensurepip is not
+available.  On Debian/Ubuntu systems, you need to install the python3-venv
+package using the following command.
+
+    apt install python3.10-venv
+
+You may need to use sudo with that command.  After installing the python3-venv
+package, recreate your virtual environment.
+
+Failing command: /var/www/delta-service/venv/bin/python3
+
+root@srv1489298:/var/www/delta-service# source venv/bin/activate
+-bash: venv/bin/activate: No such file or directory
+root@srv1489298:/var/www/delta-service# apt update
+Hit:1 https://repository.monarx.com/repository/ubuntu-jammy jammy InRelease
+Hit:2 http://archive.ubuntu.com/ubuntu jammy InRelease
+Hit:3 https://deb.nodesource.com/node_20.x nodistro InRelease
+Get:4 http://security.ubuntu.com/ubuntu jammy-security InRelease [129 kB]
+Hit:5 http://archive.ubuntu.com/ubuntu jammy-updates InRelease
+Hit:6 http://archive.ubuntu.com/ubuntu jammy-backports InRelease
+Get:7 http://security.ubuntu.com/ubuntu jammy-security/main amd64 Packages [3385 kB]
+Get:8 http://security.ubuntu.com/ubuntu jammy-security/universe amd64 Packages [1045 kB]
+Fetched 4559 kB in 26s (175 kB/s)
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+20 packages can be upgraded. Run 'apt list --upgradable' to see them.
+root@srv1489298:/var/www/delta-service# apt install -y python3-pip python3.10-venv
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+The following additional packages will be installed:
+  build-essential cpp cpp-11 dpkg-dev fakeroot g++ g++-11 gcc gcc-11 gcc-11-base libalgorithm-diff-perl
+  libalgorithm-diff-xs-perl libalgorithm-merge-perl libasan6 libatomic1 libc-dev-bin libc-devtools libc6-dev libcc1-0
+  libcrypt-dev libdpkg-perl libexpat1-dev libfakeroot libfile-fcntllock-perl libgcc-11-dev libgomp1 libisl23 libitm1
+  liblsan0 libmpc3 libnsl-dev libpython3-dev libpython3.10-dev libquadmath0 libstdc++-11-dev libtirpc-dev libtsan0
+  libubsan1 linux-libc-dev lto-disabled-list make manpages-dev python3-dev python3-pip-whl python3-setuptools-whl
+  python3-wheel python3.10-dev rpcsvc-proto zlib1g-dev
+Suggested packages:
+  cpp-doc gcc-11-locales debian-keyring g++-multilib g++-11-multilib gcc-11-doc gcc-multilib autoconf automake libtool
+  flex bison gdb gcc-doc gcc-11-multilib glibc-doc bzr libstdc++-11-doc make-doc
+The following NEW packages will be installed:
+  build-essential cpp cpp-11 dpkg-dev fakeroot g++ g++-11 gcc gcc-11 gcc-11-base libalgorithm-diff-perl
+  libalgorithm-diff-xs-perl libalgorithm-merge-perl libasan6 libatomic1 libc-dev-bin libc-devtools libc6-dev libcc1-0
+  libcrypt-dev libdpkg-perl libexpat1-dev libfakeroot libfile-fcntllock-perl libgcc-11-dev libgomp1 libisl23 libitm1
+  liblsan0 libmpc3 libnsl-dev libpython3-dev libpython3.10-dev libquadmath0 libstdc++-11-dev libtirpc-dev libtsan0
+  libubsan1 linux-libc-dev lto-disabled-list make manpages-dev python3-dev python3-pip python3-pip-whl
+  python3-setuptools-whl python3-wheel python3.10-dev python3.10-venv rpcsvc-proto zlib1g-dev
+0 upgraded, 51 newly installed, 0 to remove and 20 not upgraded.
+Need to get 71.4 MB of archives.
+After this operation, 235 MB of additional disk space will be used.
+Get:1 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libc-dev-bin amd64 2.35-0ubuntu3.13 [20.3 kB]
+Get:2 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 linux-libc-dev amd64 5.15.0-186.196 [1361 kB]
+Get:3 http://archive.ubuntu.com/ubuntu jammy/main amd64 libcrypt-dev amd64 1:4.4.27-1 [112 kB]
+Get:4 http://archive.ubuntu.com/ubuntu jammy/main amd64 rpcsvc-proto amd64 1.4.2-0ubuntu6 [68.5 kB]
+Get:5 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libtirpc-dev amd64 1.3.2-2ubuntu0.1 [192 kB]
+Get:6 http://archive.ubuntu.com/ubuntu jammy/main amd64 libnsl-dev amd64 1.3.0-2build2 [71.3 kB]
+Get:7 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libc6-dev amd64 2.35-0ubuntu3.13 [2101 kB]
+Get:8 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 gcc-11-base amd64 11.4.0-1ubuntu1~22.04.3 [216 kB]
+Get:9 http://archive.ubuntu.com/ubuntu jammy/main amd64 libisl23 amd64 0.24-2build1 [727 kB]
+Get:10 http://archive.ubuntu.com/ubuntu jammy/main amd64 libmpc3 amd64 1.2.1-2build1 [46.9 kB]
+Get:11 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 cpp-11 amd64 11.4.0-1ubuntu1~22.04.3 [10.0 MB]
+Get:12 http://archive.ubuntu.com/ubuntu jammy/main amd64 cpp amd64 4:11.2.0-1ubuntu1 [27.7 kB]
+Get:13 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libcc1-0 amd64 12.3.0-1ubuntu1~22.04.3 [48.3 kB]
+Get:14 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libgomp1 amd64 12.3.0-1ubuntu1~22.04.3 [127 kB]
+Get:15 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libitm1 amd64 12.3.0-1ubuntu1~22.04.3 [30.2 kB]
+Get:16 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libatomic1 amd64 12.3.0-1ubuntu1~22.04.3 [10.5 kB]
+Get:17 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libasan6 amd64 11.4.0-1ubuntu1~22.04.3 [2283 kB]
+Get:18 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 liblsan0 amd64 12.3.0-1ubuntu1~22.04.3 [1069 kB]
+Get:19 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libtsan0 amd64 11.4.0-1ubuntu1~22.04.3 [2260 kB]
+Get:20 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libubsan1 amd64 12.3.0-1ubuntu1~22.04.3 [976 kB]
+Get:21 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libquadmath0 amd64 12.3.0-1ubuntu1~22.04.3 [154 kB]
+Get:22 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libgcc-11-dev amd64 11.4.0-1ubuntu1~22.04.3 [2517 kB]
+Get:23 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 gcc-11 amd64 11.4.0-1ubuntu1~22.04.3 [20.1 MB]
+Get:24 http://archive.ubuntu.com/ubuntu jammy/main amd64 gcc amd64 4:11.2.0-1ubuntu1 [5112 B]
+Get:25 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libstdc++-11-dev amd64 11.4.0-1ubuntu1~22.04.3 [2101 kB]
+Get:26 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 g++-11 amd64 11.4.0-1ubuntu1~22.04.3 [11.4 MB]
+Get:27 http://archive.ubuntu.com/ubuntu jammy/main amd64 g++ amd64 4:11.2.0-1ubuntu1 [1412 B]
+Get:28 http://archive.ubuntu.com/ubuntu jammy/main amd64 make amd64 4.3-4.1build1 [180 kB]
+Get:29 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libdpkg-perl all 1.21.1ubuntu2.6 [237 kB]
+Get:30 http://archive.ubuntu.com/ubuntu jammy/main amd64 lto-disabled-list all 24 [12.5 kB]
+Get:31 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 dpkg-dev all 1.21.1ubuntu2.6 [922 kB]
+Get:32 http://archive.ubuntu.com/ubuntu jammy/main amd64 build-essential amd64 12.9ubuntu3 [4744 B]
+Get:33 http://archive.ubuntu.com/ubuntu jammy/main amd64 libfakeroot amd64 1.28-1ubuntu1 [31.5 kB]
+Get:34 http://archive.ubuntu.com/ubuntu jammy/main amd64 fakeroot amd64 1.28-1ubuntu1 [60.4 kB]
+Get:35 http://archive.ubuntu.com/ubuntu jammy/main amd64 libalgorithm-diff-perl all 1.201-1 [41.8 kB]
+Get:36 http://archive.ubuntu.com/ubuntu jammy/main amd64 libalgorithm-diff-xs-perl amd64 0.04-6build3 [11.9 kB]
+Get:37 http://archive.ubuntu.com/ubuntu jammy/main amd64 libalgorithm-merge-perl all 0.08-3 [12.0 kB]
+Get:38 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libc-devtools amd64 2.35-0ubuntu3.13 [29.0 kB]
+Get:39 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libexpat1-dev amd64 2.4.7-1ubuntu0.7 [148 kB]
+Get:40 http://archive.ubuntu.com/ubuntu jammy/main amd64 libfile-fcntllock-perl amd64 0.22-3build7 [33.9 kB]
+Get:41 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 zlib1g-dev amd64 1:1.2.11.dfsg-2ubuntu9.2 [164 kB]
+Get:42 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libpython3.10-dev amd64 3.10.12-1~22.04.16 [4766 kB]
+Get:43 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libpython3-dev amd64 3.10.6-1~22.04.1 [7064 B]
+Get:44 http://archive.ubuntu.com/ubuntu jammy/main amd64 manpages-dev all 5.10-1ubuntu1 [2309 kB]
+Get:45 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 python3.10-dev amd64 3.10.12-1~22.04.16 [508 kB]
+Get:46 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 python3-dev amd64 3.10.6-1~22.04.1 [26.0 kB]
+Get:47 http://archive.ubuntu.com/ubuntu jammy-updates/universe amd64 python3-wheel all 0.37.1-2ubuntu0.22.04.1 [32.0 kB]
+Get:48 http://archive.ubuntu.com/ubuntu jammy-updates/universe amd64 python3-pip all 22.0.2+dfsg-1ubuntu0.7 [1306 kB]
+Get:49 http://archive.ubuntu.com/ubuntu jammy-updates/universe amd64 python3-pip-whl all 22.0.2+dfsg-1ubuntu0.7 [1683 kB]
+Get:50 http://archive.ubuntu.com/ubuntu jammy-updates/universe amd64 python3-setuptools-whl all 59.6.0-1.2ubuntu0.22.04.3 [789 kB]
+Get:51 http://archive.ubuntu.com/ubuntu jammy-updates/universe amd64 python3.10-venv amd64 3.10.12-1~22.04.16 [5724 B]
+Fetched 71.4 MB in 10min 49s (110 kB/s)
+Extracting templates from packages: 100%
+Selecting previously unselected package libc-dev-bin.
+(Reading database ... 108028 files and directories currently installed.)
+Preparing to unpack .../00-libc-dev-bin_2.35-0ubuntu3.13_amd64.deb ...
+Unpacking libc-dev-bin (2.35-0ubuntu3.13) ...
+Selecting previously unselected package linux-libc-dev:amd64.
+Preparing to unpack .../01-linux-libc-dev_5.15.0-186.196_amd64.deb ...
+Unpacking linux-libc-dev:amd64 (5.15.0-186.196) ...
+Selecting previously unselected package libcrypt-dev:amd64.
+Preparing to unpack .../02-libcrypt-dev_1%3a4.4.27-1_amd64.deb ...
+Unpacking libcrypt-dev:amd64 (1:4.4.27-1) ...
+Selecting previously unselected package rpcsvc-proto.
+Preparing to unpack .../03-rpcsvc-proto_1.4.2-0ubuntu6_amd64.deb ...
+Unpacking rpcsvc-proto (1.4.2-0ubuntu6) ...
+Selecting previously unselected package libtirpc-dev:amd64.
+Preparing to unpack .../04-libtirpc-dev_1.3.2-2ubuntu0.1_amd64.deb ...
+Unpacking libtirpc-dev:amd64 (1.3.2-2ubuntu0.1) ...
+Selecting previously unselected package libnsl-dev:amd64.
+Preparing to unpack .../05-libnsl-dev_1.3.0-2build2_amd64.deb ...
+Unpacking libnsl-dev:amd64 (1.3.0-2build2) ...
+Selecting previously unselected package libc6-dev:amd64.
+Preparing to unpack .../06-libc6-dev_2.35-0ubuntu3.13_amd64.deb ...
+Unpacking libc6-dev:amd64 (2.35-0ubuntu3.13) ...
+Selecting previously unselected package gcc-11-base:amd64.
+Preparing to unpack .../07-gcc-11-base_11.4.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking gcc-11-base:amd64 (11.4.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package libisl23:amd64.
+Preparing to unpack .../08-libisl23_0.24-2build1_amd64.deb ...
+Unpacking libisl23:amd64 (0.24-2build1) ...
+Selecting previously unselected package libmpc3:amd64.
+Preparing to unpack .../09-libmpc3_1.2.1-2build1_amd64.deb ...
+Unpacking libmpc3:amd64 (1.2.1-2build1) ...
+Selecting previously unselected package cpp-11.
+Preparing to unpack .../10-cpp-11_11.4.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking cpp-11 (11.4.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package cpp.
+Preparing to unpack .../11-cpp_4%3a11.2.0-1ubuntu1_amd64.deb ...
+Unpacking cpp (4:11.2.0-1ubuntu1) ...
+Selecting previously unselected package libcc1-0:amd64.
+Preparing to unpack .../12-libcc1-0_12.3.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking libcc1-0:amd64 (12.3.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package libgomp1:amd64.
+Preparing to unpack .../13-libgomp1_12.3.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking libgomp1:amd64 (12.3.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package libitm1:amd64.
+Preparing to unpack .../14-libitm1_12.3.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking libitm1:amd64 (12.3.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package libatomic1:amd64.
+Preparing to unpack .../15-libatomic1_12.3.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking libatomic1:amd64 (12.3.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package libasan6:amd64.
+Preparing to unpack .../16-libasan6_11.4.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking libasan6:amd64 (11.4.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package liblsan0:amd64.
+Preparing to unpack .../17-liblsan0_12.3.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking liblsan0:amd64 (12.3.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package libtsan0:amd64.
+Preparing to unpack .../18-libtsan0_11.4.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking libtsan0:amd64 (11.4.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package libubsan1:amd64.
+Preparing to unpack .../19-libubsan1_12.3.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking libubsan1:amd64 (12.3.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package libquadmath0:amd64.
+Preparing to unpack .../20-libquadmath0_12.3.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking libquadmath0:amd64 (12.3.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package libgcc-11-dev:amd64.
+Preparing to unpack .../21-libgcc-11-dev_11.4.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking libgcc-11-dev:amd64 (11.4.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package gcc-11.
+Preparing to unpack .../22-gcc-11_11.4.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking gcc-11 (11.4.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package gcc.
+Preparing to unpack .../23-gcc_4%3a11.2.0-1ubuntu1_amd64.deb ...
+Unpacking gcc (4:11.2.0-1ubuntu1) ...
+Selecting previously unselected package libstdc++-11-dev:amd64.
+Preparing to unpack .../24-libstdc++-11-dev_11.4.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking libstdc++-11-dev:amd64 (11.4.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package g++-11.
+Preparing to unpack .../25-g++-11_11.4.0-1ubuntu1~22.04.3_amd64.deb ...
+Unpacking g++-11 (11.4.0-1ubuntu1~22.04.3) ...
+Selecting previously unselected package g++.
+Preparing to unpack .../26-g++_4%3a11.2.0-1ubuntu1_amd64.deb ...
+Unpacking g++ (4:11.2.0-1ubuntu1) ...
+Selecting previously unselected package make.
+Preparing to unpack .../27-make_4.3-4.1build1_amd64.deb ...
+Unpacking make (4.3-4.1build1) ...
+Selecting previously unselected package libdpkg-perl.
+Preparing to unpack .../28-libdpkg-perl_1.21.1ubuntu2.6_all.deb ...
+Unpacking libdpkg-perl (1.21.1ubuntu2.6) ...
+Selecting previously unselected package lto-disabled-list.
+Preparing to unpack .../29-lto-disabled-list_24_all.deb ...
+Unpacking lto-disabled-list (24) ...
+Selecting previously unselected package dpkg-dev.
+Preparing to unpack .../30-dpkg-dev_1.21.1ubuntu2.6_all.deb ...
+Unpacking dpkg-dev (1.21.1ubuntu2.6) ...
+Selecting previously unselected package build-essential.
+Preparing to unpack .../31-build-essential_12.9ubuntu3_amd64.deb ...
+Unpacking build-essential (12.9ubuntu3) ...
+Selecting previously unselected package libfakeroot:amd64.
+Preparing to unpack .../32-libfakeroot_1.28-1ubuntu1_amd64.deb ...
+Unpacking libfakeroot:amd64 (1.28-1ubuntu1) ...
+Selecting previously unselected package fakeroot.
+Preparing to unpack .../33-fakeroot_1.28-1ubuntu1_amd64.deb ...
+Unpacking fakeroot (1.28-1ubuntu1) ...
+Selecting previously unselected package libalgorithm-diff-perl.
+Preparing to unpack .../34-libalgorithm-diff-perl_1.201-1_all.deb ...
+Unpacking libalgorithm-diff-perl (1.201-1) ...
+Selecting previously unselected package libalgorithm-diff-xs-perl.
+Preparing to unpack .../35-libalgorithm-diff-xs-perl_0.04-6build3_amd64.deb ...
+Unpacking libalgorithm-diff-xs-perl (0.04-6build3) ...
+Selecting previously unselected package libalgorithm-merge-perl.
+Preparing to unpack .../36-libalgorithm-merge-perl_0.08-3_all.deb ...
+Unpacking libalgorithm-merge-perl (0.08-3) ...
+Selecting previously unselected package libc-devtools.
+Preparing to unpack .../37-libc-devtools_2.35-0ubuntu3.13_amd64.deb ...
+Unpacking libc-devtools (2.35-0ubuntu3.13) ...
+Selecting previously unselected package libexpat1-dev:amd64.
+Preparing to unpack .../38-libexpat1-dev_2.4.7-1ubuntu0.7_amd64.deb ...
+Unpacking libexpat1-dev:amd64 (2.4.7-1ubuntu0.7) ...
+Selecting previously unselected package libfile-fcntllock-perl.
+Preparing to unpack .../39-libfile-fcntllock-perl_0.22-3build7_amd64.deb ...
+Unpacking libfile-fcntllock-perl (0.22-3build7) ...
+Selecting previously unselected package zlib1g-dev:amd64.
+Preparing to unpack .../40-zlib1g-dev_1%3a1.2.11.dfsg-2ubuntu9.2_amd64.deb ...
+Unpacking zlib1g-dev:amd64 (1:1.2.11.dfsg-2ubuntu9.2) ...
+Selecting previously unselected package libpython3.10-dev:amd64.
+Preparing to unpack .../41-libpython3.10-dev_3.10.12-1~22.04.16_amd64.deb ...
+Unpacking libpython3.10-dev:amd64 (3.10.12-1~22.04.16) ...
+Selecting previously unselected package libpython3-dev:amd64.
+Preparing to unpack .../42-libpython3-dev_3.10.6-1~22.04.1_amd64.deb ...
+Unpacking libpython3-dev:amd64 (3.10.6-1~22.04.1) ...
+Selecting previously unselected package manpages-dev.
+Preparing to unpack .../43-manpages-dev_5.10-1ubuntu1_all.deb ...
+Unpacking manpages-dev (5.10-1ubuntu1) ...
+Selecting previously unselected package python3.10-dev.
+Preparing to unpack .../44-python3.10-dev_3.10.12-1~22.04.16_amd64.deb ...
+Unpacking python3.10-dev (3.10.12-1~22.04.16) ...
+Selecting previously unselected package python3-dev.
+Preparing to unpack .../45-python3-dev_3.10.6-1~22.04.1_amd64.deb ...
+Unpacking python3-dev (3.10.6-1~22.04.1) ...
+Selecting previously unselected package python3-wheel.
+Preparing to unpack .../46-python3-wheel_0.37.1-2ubuntu0.22.04.1_all.deb ...
+Unpacking python3-wheel (0.37.1-2ubuntu0.22.04.1) ...
+Selecting previously unselected package python3-pip.
+Preparing to unpack .../47-python3-pip_22.0.2+dfsg-1ubuntu0.7_all.deb ...
+Unpacking python3-pip (22.0.2+dfsg-1ubuntu0.7) ...
+Selecting previously unselected package python3-pip-whl.
+Preparing to unpack .../48-python3-pip-whl_22.0.2+dfsg-1ubuntu0.7_all.deb ...
+Unpacking python3-pip-whl (22.0.2+dfsg-1ubuntu0.7) ...
+Selecting previously unselected package python3-setuptools-whl.
+Preparing to unpack .../49-python3-setuptools-whl_59.6.0-1.2ubuntu0.22.04.3_all.deb ...
+Unpacking python3-setuptools-whl (59.6.0-1.2ubuntu0.22.04.3) ...
+Selecting previously unselected package python3.10-venv.
+Preparing to unpack .../50-python3.10-venv_3.10.12-1~22.04.16_amd64.deb ...
+Unpacking python3.10-venv (3.10.12-1~22.04.16) ...
+Setting up gcc-11-base:amd64 (11.4.0-1ubuntu1~22.04.3) ...
+Setting up manpages-dev (5.10-1ubuntu1) ...
+Setting up python3-setuptools-whl (59.6.0-1.2ubuntu0.22.04.3) ...
+Setting up lto-disabled-list (24) ...
+Setting up libfile-fcntllock-perl (0.22-3build7) ...
+Setting up python3-pip-whl (22.0.2+dfsg-1ubuntu0.7) ...
+Setting up libalgorithm-diff-perl (1.201-1) ...
+Setting up linux-libc-dev:amd64 (5.15.0-186.196) ...
+Setting up libgomp1:amd64 (12.3.0-1ubuntu1~22.04.3) ...
+Setting up python3-wheel (0.37.1-2ubuntu0.22.04.1) ...
+Setting up libfakeroot:amd64 (1.28-1ubuntu1) ...
+Setting up libasan6:amd64 (11.4.0-1ubuntu1~22.04.3) ...
+Setting up fakeroot (1.28-1ubuntu1) ...
+update-alternatives: using /usr/bin/fakeroot-sysv to provide /usr/bin/fakeroot (fakeroot) in auto mode
+Setting up libtirpc-dev:amd64 (1.3.2-2ubuntu0.1) ...
+Setting up rpcsvc-proto (1.4.2-0ubuntu6) ...
+Setting up make (4.3-4.1build1) ...
+Setting up libquadmath0:amd64 (12.3.0-1ubuntu1~22.04.3) ...
+Setting up libmpc3:amd64 (1.2.1-2build1) ...
+Setting up libatomic1:amd64 (12.3.0-1ubuntu1~22.04.3) ...
+Setting up python3-pip (22.0.2+dfsg-1ubuntu0.7) ...
+Setting up libdpkg-perl (1.21.1ubuntu2.6) ...
+Setting up libubsan1:amd64 (12.3.0-1ubuntu1~22.04.3) ...
+Setting up libnsl-dev:amd64 (1.3.0-2build2) ...
+Setting up libcrypt-dev:amd64 (1:4.4.27-1) ...
+Setting up libisl23:amd64 (0.24-2build1) ...
+Setting up libc-dev-bin (2.35-0ubuntu3.13) ...
+Setting up libalgorithm-diff-xs-perl (0.04-6build3) ...
+Setting up libcc1-0:amd64 (12.3.0-1ubuntu1~22.04.3) ...
+Setting up liblsan0:amd64 (12.3.0-1ubuntu1~22.04.3) ...
+Setting up libitm1:amd64 (12.3.0-1ubuntu1~22.04.3) ...
+Setting up libc-devtools (2.35-0ubuntu3.13) ...
+Setting up libalgorithm-merge-perl (0.08-3) ...
+Setting up libtsan0:amd64 (11.4.0-1ubuntu1~22.04.3) ...
+Setting up cpp-11 (11.4.0-1ubuntu1~22.04.3) ...
+Setting up python3.10-venv (3.10.12-1~22.04.16) ...
+Setting up dpkg-dev (1.21.1ubuntu2.6) ...
+Setting up libgcc-11-dev:amd64 (11.4.0-1ubuntu1~22.04.3) ...
+Setting up gcc-11 (11.4.0-1ubuntu1~22.04.3) ...
+Setting up cpp (4:11.2.0-1ubuntu1) ...
+Setting up libc6-dev:amd64 (2.35-0ubuntu3.13) ...
+Setting up gcc (4:11.2.0-1ubuntu1) ...
+Setting up libexpat1-dev:amd64 (2.4.7-1ubuntu0.7) ...
+Setting up libstdc++-11-dev:amd64 (11.4.0-1ubuntu1~22.04.3) ...
+Setting up zlib1g-dev:amd64 (1:1.2.11.dfsg-2ubuntu9.2) ...
+Setting up g++-11 (11.4.0-1ubuntu1~22.04.3) ...
+Setting up libpython3.10-dev:amd64 (3.10.12-1~22.04.16) ...
+Setting up python3.10-dev (3.10.12-1~22.04.16) ...
+Setting up g++ (4:11.2.0-1ubuntu1) ...
+update-alternatives: using /usr/bin/g++ to provide /usr/bin/c++ (c++) in auto mode
+Setting up build-essential (12.9ubuntu3) ...
+Setting up libpython3-dev:amd64 (3.10.6-1~22.04.1) ...
+Setting up python3-dev (3.10.6-1~22.04.1) ...
+Processing triggers for man-db (2.10.2-1) ...
+Processing triggers for libc-bin (2.35-0ubuntu3.13) ...
+Scanning processes...
+Scanning candidates...
+Scanning linux images...
+
+Restarting services...
+ systemctl restart multipathd.service packagekit.service
+Service restarts being deferred:
+ systemctl restart networkd-dispatcher.service
+ systemctl restart unattended-upgrades.service
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+root@srv1489298:/var/www/delta-service# python3 --version
+pip3 --version
+Python 3.10.12
+pip 22.0.2 from /usr/lib/python3/dist-packages/pip (python 3.10)
+root@srv1489298:/var/www/delta-service# cd /var/www/delta-service
+python3 -m venv venv
+root@srv1489298:/var/www/delta-service# source venv/bin/activate
+(venv) root@srv1489298:/var/www/delta-service# pip install --upgrade pip
+Requirement already satisfied: pip in ./venv/lib/python3.10/site-packages (22.0.2)
+Collecting pip
+  Downloading pip-26.1.2-py3-none-any.whl (1.8 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 14.3 MB/s eta 0:00:00
+Installing collected packages: pip
+  Attempting uninstall: pip
+    Found existing installation: pip 22.0.2
+    Uninstalling pip-22.0.2:
+      Successfully uninstalled pip-22.0.2
+Successfully installed pip-26.1.2
+(venv) root@srv1489298:/var/www/delta-service# pip install -r requirements.txt
+Collecting flask (from -r requirements.txt (line 1))
+  Downloading flask-3.1.3-py3-none-any.whl.metadata (3.2 kB)
+Collecting flask-cors (from -r requirements.txt (line 2))
+  Downloading flask_cors-6.0.5-py3-none-any.whl.metadata (5.4 kB)
+Collecting python-dotenv (from -r requirements.txt (line 3))
+  Downloading python_dotenv-1.2.2-py3-none-any.whl.metadata (27 kB)
+Collecting delta-rest-client (from -r requirements.txt (line 4))
+  Downloading delta_rest_client-1.0.14-py3-none-any.whl.metadata (10 kB)
+Collecting requests (from -r requirements.txt (line 5))
+  Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+Collecting websocket-client (from -r requirements.txt (line 6))
+  Downloading websocket_client-1.9.0-py3-none-any.whl.metadata (8.3 kB)
+Collecting blinker>=1.9.0 (from flask->-r requirements.txt (line 1))
+  Downloading blinker-1.9.0-py3-none-any.whl.metadata (1.6 kB)
+Collecting click>=8.1.3 (from flask->-r requirements.txt (line 1))
+  Downloading click-8.4.2-py3-none-any.whl.metadata (2.6 kB)
+Collecting itsdangerous>=2.2.0 (from flask->-r requirements.txt (line 1))
+  Downloading itsdangerous-2.2.0-py3-none-any.whl.metadata (1.9 kB)
+Collecting jinja2>=3.1.2 (from flask->-r requirements.txt (line 1))
+  Downloading jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+Collecting markupsafe>=2.1.1 (from flask->-r requirements.txt (line 1))
+  Downloading markupsafe-3.0.3-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.7 kB)
+Collecting werkzeug>=3.1.0 (from flask->-r requirements.txt (line 1))
+  Downloading werkzeug-3.1.8-py3-none-any.whl.metadata (4.0 kB)
+Collecting typing_extensions>=4.6.0 (from flask-cors->-r requirements.txt (line 2))
+  Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting charset_normalizer<4,>=2 (from requests->-r requirements.txt (line 5))
+  Downloading charset_normalizer-3.4.9-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (41 kB)
+Collecting idna<4,>=2.5 (from requests->-r requirements.txt (line 5))
+  Downloading idna-3.18-py3-none-any.whl.metadata (6.1 kB)
+Collecting urllib3<3,>=1.26 (from requests->-r requirements.txt (line 5))
+  Downloading urllib3-2.7.0-py3-none-any.whl.metadata (6.9 kB)
+Collecting certifi>=2023.5.7 (from requests->-r requirements.txt (line 5))
+  Downloading certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+Downloading flask-3.1.3-py3-none-any.whl (103 kB)
+Downloading flask_cors-6.0.5-py3-none-any.whl (16 kB)
+Downloading python_dotenv-1.2.2-py3-none-any.whl (22 kB)
+Downloading delta_rest_client-1.0.14-py3-none-any.whl (7.7 kB)
+Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+Downloading charset_normalizer-3.4.9-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (223 kB)
+Downloading idna-3.18-py3-none-any.whl (65 kB)
+Downloading urllib3-2.7.0-py3-none-any.whl (131 kB)
+Downloading websocket_client-1.9.0-py3-none-any.whl (82 kB)
+Downloading blinker-1.9.0-py3-none-any.whl (8.5 kB)
+Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
+Downloading click-8.4.2-py3-none-any.whl (119 kB)
+Downloading itsdangerous-2.2.0-py3-none-any.whl (16 kB)
+Downloading jinja2-3.1.6-py3-none-any.whl (134 kB)
+Downloading markupsafe-3.0.3-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (20 kB)
+Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+Downloading werkzeug-3.1.8-py3-none-any.whl (226 kB)
+Installing collected packages: delta-rest-client, websocket-client, urllib3, typing_extensions, python-dotenv, markupsafe, itsdangerous, idna, click, charset_normalizer, certifi, blinker, werkzeug, requests, jinja2, flask, flask-cors
+Successfully installed blinker-1.9.0 certifi-2026.7.22 charset_normalizer-3.4.9 click-8.4.2 delta-rest-client-1.0.14 flask-3.1.3 flask-cors-6.0.5 idna-3.18 itsdangerous-2.2.0 jinja2-3.1.6 markupsafe-3.0.3 python-dotenv-1.2.2 requests-2.34.2 typing_extensions-4.16.0 urllib3-2.7.0 websocket-client-1.9.0 werkzeug-3.1.8
+(venv) root@srv1489298:/var/www/delta-service# cat requirements.txt
+flask
+flask-cors
+python-dotenv
+delta-rest-client
+requests
+websocket-client(venv) root@srv1489298:/var/www/delta-service# ls -la
+total 124
+drwxr-xr-x 4 root root  4096 Jul 22 18:09 .
+drwxr-xr-x 5 root root  4096 Jul 22 18:03 ..
+drwxr-xr-x 8 root root  4096 Jul 22 18:08 .git
+-rw-r--r-- 1 root root   118 Jul 22 18:08 .gitignore
+-rw-r--r-- 1 root root 40825 Jul 22 18:08 app.py
+-rw-r--r-- 1 root root 12418 Jul 22 18:08 market_data.py
+-rw-r--r-- 1 root root    74 Jul 22 18:08 requirements.txt
+-rw-r--r-- 1 root root 32022 Jul 22 18:08 strategy.py
+drwxr-xr-x 5 root root  4096 Jul 22 18:09 venv
+-rw-r--r-- 1 root root 11921 Jul 22 18:08 websocket_feed.py
+(venv) root@srv1489298:/var/www/delta-service# nano .env
+(venv) root@srv1489298:/var/www/delta-service# grep -n "os.getenv\|os.environ" app.py
+21:CORS(app, origins=os.getenv("ALLOWED_ORIGINS", "*").split(","))
+23:DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
+30:BASE_URL = os.getenv("DELTA_BASE_URL")
+31:API_KEY = os.getenv("DELTA_API_KEY")
+32:API_SECRET = os.getenv("DELTA_API_SECRET")
+420:HEARTBEAT_ID = os.getenv("HEARTBEAT_ID", "delta_service_bot")
+421:HEARTBEAT_TTL_MS = int(os.getenv("HEARTBEAT_TTL_MS", "30000"))  # 30s
+422:HEARTBEAT_INTERVAL_SEC = int(os.getenv("HEARTBEAT_INTERVAL_SEC", "25"))  # send before TTL expires
+423:HEARTBEAT_ENABLED = os.getenv("HEARTBEAT_ENABLED", "false").lower() == "true"
+990:    port = int(os.getenv("PORT", 5002))
+(venv) root@srv1489298:/var/www/delta-service# grep -n "os.getenv\|os.environ" app.py
+21:CORS(app, origins=os.getenv("ALLOWED_ORIGINS", "*").split(","))
+23:DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
+30:BASE_URL = os.getenv("DELTA_BASE_URL")
+31:API_KEY = os.getenv("DELTA_API_KEY")
+32:API_SECRET = os.getenv("DELTA_API_SECRET")
+420:HEARTBEAT_ID = os.getenv("HEARTBEAT_ID", "delta_service_bot")
+421:HEARTBEAT_TTL_MS = int(os.getenv("HEARTBEAT_TTL_MS", "30000"))  # 30s
+422:HEARTBEAT_INTERVAL_SEC = int(os.getenv("HEARTBEAT_INTERVAL_SEC", "25"))  # send before TTL expires
+423:HEARTBEAT_ENABLED = os.getenv("HEARTBEAT_ENABLED", "false").lower() == "true"
+990:    port = int(os.getenv("PORT", 5002))
+(venv) root@srv1489298:/var/www/delta-service# nano .env
+(venv) root@srv1489298:/var/www/delta-service# python app.py
+[startup] discovered 220 live perpetual futures from Delta
+[market_data] backfilled 109 candles for 1000BONKUSD
+[market_data] backfilled 1 candles for 1000FLOKIUSD
+[market_data] backfilled 161 candles for 1MBABYDOGEUSD
+[market_data] backfilled 197 candles for AAPLXUSD
+[market_data] backfilled 193 candles for AAVEUSD
+[market_data] backfilled 165 candles for 1000SHIBUSD
+[market_data] backfilled 179 candles for 1000PEPEUSD
+[market_data] backfilled 167 candles for 1000SATSUSD
+[market_data] backfilled 175 candles for ACTUSD
+[market_data] backfilled 197 candles for ADAUSD
+[market_data] backfilled 172 candles for AINUSD
+[market_data] backfilled 83 candles for ALTUSD
+[market_data] backfilled 199 candles for ALLOUSD
+[market_data] backfilled 192 candles for AIOTUSD
+[market_data] backfilled 194 candles for AIOUSD
+[market_data] backfilled 193 candles for AMDBUSD
+[market_data] backfilled 199 candles for AKEUSD
+[market_data] backfilled 101 candles for AIXBTUSD
+[market_data] backfilled 200 candles for AMZNXUSD
+[market_data] backfilled 162 candles for AIGENSYNUSD
+[market_data] backfilled 146 candles for API3USD
+[market_data] backfilled 198 candles for ARCUSD
+[market_data] backfilled 0 candles for AUCTIONUSD
+[market_data] backfilled 180 candles for ARMBUSD
+[market_data] backfilled 200 candles for ARIAUSD
+[market_data] backfilled 1 candles for ASTERUSD
+[market_data] backfilled 125 candles for APTUSD
+[market_data] backfilled 179 candles for ARUSD
+[market_data] backfilled 144 candles for ARBUSD
+[market_data] backfilled 199 candles for AVAAIUSD
+[market_data] backfilled 194 candles for AVAXUSD
+[market_data] backfilled 0 candles for AXSUSD
+[market_data] backfilled 197 candles for BABABUSD
+[market_data] backfilled 188 candles for BASEDUSD
+[market_data] backfilled 149 candles for BBUSD
+[market_data] backfilled 194 candles for BCHUSD
+[market_data] backfilled 200 candles for BANKUSD
+[market_data] backfilled 198 candles for BILLUSD
+[market_data] backfilled 0 candles for BERAUSD
+[market_data] backfilled 200 candles for BEATUSD
+[market_data] backfilled 182 candles for BIOUSD
+[market_data] backfilled 185 candles for BLURUSD
+[market_data] backfilled 200 candles for BLESSUSD
+[market_data] backfilled 198 candles for BNBUSD
+[market_data] backfilled 200 candles for BTCUSD
+[market_data] backfilled 13 candles for BMTUSD
+[market_data] backfilled 200 candles for BUSD
+[market_data] backfilled 1 candles for CHIPUSD
+[market_data] backfilled 134 candles for CAKEUSD
+[market_data] backfilled 199 candles for CBRSBUSD
+[market_data] backfilled 195 candles for CRCLXUSD
+[market_data] backfilled 198 candles for COINXUSD
+[market_data] backfilled 1 candles for CROSSUSD
+[market_data] backfilled 6 candles for DEEPUSD
+[market_data] backfilled 155 candles for DOGSUSD
+[market_data] backfilled 193 candles for DOGEUSD
+[market_data] backfilled 1 candles for COOKIEUSD
+[market_data] backfilled 100 candles for DASHUSD
+[market_data] backfilled 172 candles for COAIUSD
+[market_data] backfilled 193 candles for DOTUSD
+[market_data] backfilled 36 candles for DUSKUSD
+[market_data] backfilled 188 candles for EIGENUSD
+[market_data] backfilled 179 candles for DYDXUSD
+[market_data] backfilled 181 candles for EDENUSD
+[market_data] backfilled 189 candles for DRAMBUSD
+[market_data] backfilled 1 candles for ENJUSD
+[market_data] backfilled 199 candles for ESPORTSUSD
+[market_data] backfilled 188 candles for ENAUSD
+[market_data] backfilled 171 candles for ETHFIUSD
+[market_data] backfilled 191 candles for ETCUSD
+[market_data] backfilled 180 candles for EWYBUSD
+[market_data] backfilled 200 candles for ETHUSD
+[market_data] backfilled 196 candles for FARTCOINUSD
+[market_data] backfilled 145 candles for FFUSD
+[market_data] backfilled 200 candles for EVAAUSD
+[market_data] backfilled 1 candles for FRAXUSD
+[market_data] backfilled 0 candles for GLMUSD
+[market_data] backfilled 125 candles for FILUSD
+[market_data] backfilled 82 candles for GIGGLEUSD
+[market_data] backfilled 137 candles for GALAUSD
+[market_data] backfilled 41 candles for GOATUSD
+[market_data] backfilled 169 candles for GRAMUSD
+[market_data] backfilled 199 candles for GOOGLXUSD
+[market_data] backfilled 158 candles for GRIFFAINUSD
+[market_data] backfilled 200 candles for HBARUSD
+[market_data] backfilled 199 candles for HANAUSD
+[market_data] backfilled 198 candles for HUSD
+[market_data] backfilled 182 candles for HOODBUSD
+[market_data] backfilled 92 candles for HIVEUSD
+[market_data] backfilled 199 candles for HYPEUSD
+[market_data] backfilled 142 candles for INJUSD
+[market_data] backfilled 1 candles for INUSD
+[market_data] backfilled 132 candles for INITUSD
+[market_data] backfilled 176 candles for IOUSD
+[market_data] backfilled 179 candles for INTCBUSD
+[market_data] backfilled 148 candles for JASMYUSD
+[market_data] backfilled 90 candles for IOTAUSD
+[market_data] backfilled 190 candles for JUPUSD
+[market_data] backfilled 190 candles for KAITOUSD
+[market_data] backfilled 168 candles for JTOUSD
+[market_data] backfilled 0 candles for KSMUSD
+[market_data] backfilled 1 candles for LAYERUSD
+[market_data] backfilled 183 candles for KITEUSD
+[market_data] backfilled 189 candles for LIGHTUSD
+[market_data] backfilled 168 candles for LDOUSD
+[market_data] backfilled 200 candles for LINKUSD
+[market_data] backfilled 200 candles for LABUSD
+[market_data] backfilled 174 candles for LITEBUSD
+[market_data] backfilled 199 candles for LISTAUSD
+[market_data] backfilled 188 candles for LITUSD
+[market_data] backfilled 123 candles for MANAUSD
+[market_data] backfilled 1 candles for MASKUSD
+[market_data] backfilled 197 candles for LTCUSD
+[market_data] backfilled 83 candles for MELANIAUSD
+[market_data] backfilled 168 candles for MANTAUSD
+[market_data] backfilled 1 candles for MEUSD
+[market_data] backfilled 13 candles for MMTUSD
+[market_data] backfilled 180 candles for METAXUSD
+[market_data] backfilled 178 candles for MEMEUSD
+[market_data] backfilled 116 candles for MONUSD
+[market_data] backfilled 111 candles for MOODENGUSD
+[market_data] backfilled 194 candles for MRVLBUSD
+[market_data] backfilled 18 candles for MOVEUSD
+[market_data] backfilled 184 candles for MUBARAKUSD
+[market_data] backfilled 44 candles for NEIROUSD
+[market_data] backfilled 200 candles for NBISBUSD
+[market_data] backfilled 196 candles for MUBUSD
+[market_data] backfilled 200 candles for MUSD
+[market_data] backfilled 197 candles for MSTRBUSD
+[market_data] backfilled 188 candles for NEARUSD
+[market_data] backfilled 199 candles for NVDAXUSD
+[market_data] backfilled 199 candles for ONDOUSD
+[market_data] backfilled 46 candles for ORDIUSD
+[market_data] backfilled 178 candles for NOTUSD
+[market_data] backfilled 1 candles for ORDERUSD
+[market_data] backfilled 178 candles for PENDLEUSD
+[market_data] backfilled 134 candles for PARTIUSD
+[market_data] backfilled 131 candles for OPUSD
+[market_data] backfilled 190 candles for OPNUSD
+[market_data] backfilled 200 candles for PAXGUSD
+[market_data] backfilled 118 candles for PNUTUSD
+[market_data] backfilled 189 candles for PIUSD
+[market_data] backfilled 1 candles for PIEVERSEUSD
+[market_data] backfilled 85 candles for PEOPLEUSD
+[market_data] backfilled 122 candles for POLUSD
+[market_data] backfilled 197 candles for PLTRBUSD
+[market_data] backfilled 0 candles for PROVEUSD
+[market_data] backfilled 75 candles for POPCATUSD
+[market_data] backfilled 199 candles for PIPPINUSD
+[market_data] backfilled 165 candles for PENGUUSD
+[market_data] backfilled 200 candles for RAVEUSD
+[market_data] backfilled 191 candles for QQQXUSD
+[market_data] backfilled 122 candles for REDUSD
+[market_data] backfilled 1 candles for RAREUSD
+[market_data] backfilled 183 candles for RKLBBUSD
+[market_data] backfilled 19 candles for RUNEUSD
+[market_data] backfilled 14 candles for RSRUSD
+[market_data] backfilled 191 candles for PUMPUSD
+[market_data] backfilled 198 candles for RIVERUSD
+[market_data] backfilled 155 candles for SAGAUSD
+[market_data] backfilled 75 candles for SIGNUSD
+[market_data] backfilled 175 candles for SEIUSD
+[market_data] backfilled 146 candles for SAHARAUSD
+[market_data] backfilled 184 candles for SKHYBUSD
+[market_data] backfilled 200 candles for SIRENUSD
+[market_data] backfilled 185 candles for SKLUSD
+[market_data] backfilled 199 candles for SLVONUSD
+[market_data] backfilled 196 candles for SKYAIUSD
+[market_data] backfilled 200 candles for SOLUSD
+[market_data] backfilled 200 candles for SNDKBUSD
+[market_data] backfilled 111 candles for SOLVUSD
+[market_data] backfilled 184 candles for SONICUSD
+[market_data] backfilled 0 candles for SOPHUSD
+[market_data] backfilled 198 candles for SOXLBUSD
+[market_data] backfilled 200 candles for SPCXXUSD
+[market_data] backfilled 182 candles for SPYXUSD
+[market_data] backfilled 22 candles for STRKUSD
+[market_data] backfilled 162 candles for STBLUSD
+[market_data] backfilled 173 candles for STXUSD
+[market_data] backfilled 186 candles for SPXUSD
+[market_data] backfilled 1 candles for SUSD
+[market_data] backfilled 1 candles for SUNUSD
+[market_data] backfilled 200 candles for TACUSD
+[market_data] backfilled 191 candles for SUIUSD
+[market_data] backfilled 76 candles for SUSHIUSD
+[market_data] backfilled 70 candles for TNSRUSD
+[market_data] backfilled 1 candles for TIAUSD
+[market_data] backfilled 184 candles for TLMUSD
+[market_data] backfilled 185 candles for SWARMSUSD
+[market_data] backfilled 188 candles for TAOUSD
+[market_data] backfilled 200 candles for TSLAXUSD
+[market_data] backfilled 1 candles for TRBUSD
+[market_data] backfilled 177 candles for TRUMPUSD
+[market_data] backfilled 26 candles for TSTUSD
+[market_data] backfilled 185 candles for USUALUSD
+[market_data] backfilled 179 candles for TOWNSUSD
+[market_data] backfilled 170 candles for TRXUSD
+[market_data] backfilled 199 candles for UNIUSD
+[market_data] backfilled 75 candles for VANAUSD
+[market_data] backfilled 196 candles for TSMBUSD
+[market_data] backfilled 106 candles for WCTUSD
+[market_data] backfilled 199 candles for VVVUSD
+[market_data] backfilled 166 candles for VIRTUALUSD
+[market_data] backfilled 182 candles for WDCBUSD
+[market_data] backfilled 167 candles for WIFUSD
+[market_data] backfilled 191 candles for VELVETUSD
+[market_data] backfilled 52 candles for WLFIUSD
+[market_data] backfilled 200 candles for XANUSD
+[market_data] backfilled 192 candles for WLDUSD
+[market_data] backfilled 151 candles for XAIUSD
+[market_data] backfilled 134 candles for XMRUSD
+[market_data] backfilled 193 candles for XLMUSD
+[market_data] backfilled 182 candles for XPLUSD
+[market_data] backfilled 200 candles for ZECUSD
+[market_data] backfilled 0 candles for ZORAUSD
+[market_data] backfilled 102 candles for ZROUSD
+[market_data] backfilled 130 candles for ZENUSD
+[market_data] backfilled 156 candles for ZKUSD
+[market_data] backfilled 200 candles for XRPUSD
+[market_data] backfilled 200 candles for XAUTUSD
+[market_data] backfilled 109 candles for 1000BONKUSD
+[market_data] backfilled 179 candles for 1000PEPEUSD
+[market_data] backfilled 167 candles for 1000SATSUSD
+[market_data] backfilled 1 candles for 1000FLOKIUSD
+[market_data] backfilled 193 candles for AAVEUSD
+[market_data] backfilled 175 candles for ACTUSD
+[market_data] backfilled 165 candles for 1000SHIBUSD
+[market_data] backfilled 161 candles for 1MBABYDOGEUSD
+[market_data] backfilled 197 candles for AAPLXUSD
+[market_data] backfilled 197 candles for ADAUSD
+[market_data] ws connected, subscribing 220 symbols in chunks of 50
+[market_data] backfilled 162 candles for AIGENSYNUSD
+[market_data] backfilled 172 candles for AINUSD
+[market_data] backfilled 101 candles for AIXBTUSD
+[market_data] backfilled 199 candles for AKEUSD
+[market_data] backfilled 192 candles for AIOTUSD
+[market_data] backfilled 194 candles for AIOUSD
+[market_data] backfilled 199 candles for ALLOUSD
+[market_data] backfilled 83 candles for ALTUSD
+[market_data] backfilled 193 candles for AMDBUSD
+[market_data] backfilled 200 candles for AMZNXUSD
+[market_data] backfilled 125 candles for APTUSD
+[market_data] backfilled 146 candles for API3USD
+[market_data] backfilled 1 candles for ASTERUSD
+[market_data] backfilled 198 candles for ARCUSD
+[market_data] backfilled 144 candles for ARBUSD
+[market_data] backfilled 180 candles for ARMBUSD
+[market_data] backfilled 179 candles for ARUSD
+[market_data] backfilled 0 candles for AUCTIONUSD
+[market_data] backfilled 199 candles for AVAAIUSD
+[market_data] backfilled 200 candles for ARIAUSD
+[market_data] backfilled 194 candles for AVAXUSD
+[market_data] backfilled 188 candles for BASEDUSD
+[market_data] backfilled 197 candles for BABABUSD
+[market_data] backfilled 0 candles for AXSUSD
+[market_data] backfilled 200 candles for BANKUSD
+[market_data] backfilled 149 candles for BBUSD
+[market_data] backfilled 0 candles for BERAUSD
+[market_data] backfilled 200 candles for BEATUSD
+[market_data] backfilled 194 candles for BCHUSD
+[market_data] backfilled 198 candles for BILLUSD
+[market_data] backfilled 182 candles for BIOUSD
+[market_data] backfilled 200 candles for BLESSUSD
+[market_data] backfilled 13 candles for BMTUSD
+[market_data] backfilled 185 candles for BLURUSD
+[market_data] backfilled 198 candles for BNBUSD
+[market_data] backfilled 1 candles for CHIPUSD
+[market_data] backfilled 200 candles for BTCUSD
+[market_data] backfilled 200 candles for BUSD
+[market_data] backfilled 134 candles for CAKEUSD
+[market_data] backfilled 199 candles for CBRSBUSD
+[market_data] backfilled 198 candles for COINXUSD
+[market_data] backfilled 195 candles for CRCLXUSD
+[market_data] backfilled 1 candles for CROSSUSD
+[market_data] backfilled 172 candles for COAIUSD
+[market_data] backfilled 100 candles for DASHUSD
+[market_data] backfilled 6 candles for DEEPUSD
+[market_data] backfilled 1 candles for COOKIEUSD
+[market_data] backfilled 193 candles for DOTUSD
+[market_data] backfilled 155 candles for DOGSUSD
+[market_data] backfilled 193 candles for DOGEUSD
+[market_data] backfilled 36 candles for DUSKUSD
+[market_data] backfilled 179 candles for DYDXUSD
+[market_data] backfilled 189 candles for DRAMBUSD
+[market_data] backfilled 188 candles for ENAUSD
+[market_data] backfilled 199 candles for ESPORTSUSD
+[market_data] backfilled 1 candles for ENJUSD
+[market_data] backfilled 181 candles for EDENUSD
+[market_data] backfilled 188 candles for EIGENUSD
+[market_data] backfilled 171 candles for ETHFIUSD
+[market_data] backfilled 191 candles for ETCUSD
+[market_data] backfilled 200 candles for EVAAUSD
+[market_data] backfilled 200 candles for ETHUSD
+[market_data] backfilled 180 candles for EWYBUSD
+[market_data] backfilled 145 candles for FFUSD
+[market_data] backfilled 125 candles for FILUSD
+[market_data] backfilled 1 candles for FRAXUSD
+[market_data] backfilled 82 candles for GIGGLEUSD
+[market_data] backfilled 137 candles for GALAUSD
+[market_data] backfilled 0 candles for GLMUSD
+[market_data] backfilled 196 candles for FARTCOINUSD
+[market_data] backfilled 169 candles for GRAMUSD
+[market_data] backfilled 199 candles for HANAUSD
+[market_data] backfilled 199 candles for GOOGLXUSD
+[market_data] backfilled 41 candles for GOATUSD
+[market_data] backfilled 92 candles for HIVEUSD
+[market_data] backfilled 158 candles for GRIFFAINUSD
+[market_data] backfilled 182 candles for HOODBUSD
+[market_data] backfilled 198 candles for HUSD
+[market_data] backfilled 200 candles for HBARUSD
+[market_data] backfilled 199 candles for HYPEUSD
+[market_data] backfilled 132 candles for INITUSD
+[market_data] backfilled 1 candles for INUSD
+[market_data] backfilled 179 candles for INTCBUSD
+[market_data] backfilled 168 candles for JTOUSD
+[market_data] backfilled 142 candles for INJUSD
+[market_data] backfilled 90 candles for IOTAUSD
+[market_data] backfilled 148 candles for JASMYUSD
+[market_data] backfilled 176 candles for IOUSD
+[market_data] backfilled 190 candles for JUPUSD
+[market_data] backfilled 190 candles for KAITOUSD
+[market_data] backfilled 200 candles for LABUSD
+[market_data] backfilled 0 candles for KSMUSD
+[market_data] backfilled 1 candles for LAYERUSD
+[market_data] backfilled 183 candles for KITEUSD
+[market_data] backfilled 189 candles for LIGHTUSD
+[market_data] backfilled 168 candles for LDOUSD
+[market_data] backfilled 174 candles for LITEBUSD
+[market_data] backfilled 188 candles for LITUSD
+[market_data] backfilled 200 candles for LINKUSD
+[market_data] backfilled 199 candles for LISTAUSD
+[market_data] backfilled 168 candles for MANTAUSD
+[market_data] backfilled 197 candles for LTCUSD
+[market_data] backfilled 123 candles for MANAUSD
+[market_data] backfilled 83 candles for MELANIAUSD
+[market_data] backfilled 178 candles for MEMEUSD
+[market_data] backfilled 1 candles for MASKUSD
+[market_data] backfilled 1 candles for MEUSD
+[market_data] backfilled 116 candles for MONUSD
+[market_data] backfilled 180 candles for METAXUSD
+[market_data] backfilled 13 candles for MMTUSD
+[market_data] backfilled 111 candles for MOODENGUSD
+[market_data] backfilled 197 candles for MSTRBUSD
+[market_data] backfilled 184 candles for MUBARAKUSD
+[market_data] backfilled 200 candles for NBISBUSD
+[market_data] backfilled 18 candles for MOVEUSD
+[market_data] backfilled 194 candles for MRVLBUSD
+[market_data] backfilled 44 candles for NEIROUSD
+[market_data] backfilled 188 candles for NEARUSD
+[market_data] backfilled 200 candles for MUSD
+[market_data] backfilled 196 candles for MUBUSD
+[market_data] backfilled 1 candles for ORDERUSD
+[market_data] backfilled 199 candles for NVDAXUSD
+[market_data] backfilled 178 candles for NOTUSD
+[market_data] backfilled 200 candles for ONDOUSD
+[market_data] backfilled 46 candles for ORDIUSD
+[market_data] backfilled 131 candles for OPUSD
+[market_data] backfilled 178 candles for PENDLEUSD
+[market_data] backfilled 190 candles for OPNUSD
+[market_data] backfilled 134 candles for PARTIUSD
+[market_data] backfilled 200 candles for PAXGUSD
+[market_data] backfilled 199 candles for PIPPINUSD
+[market_data] backfilled 1 candles for PIEVERSEUSD
+[market_data] backfilled 85 candles for PEOPLEUSD
+[market_data] backfilled 118 candles for PNUTUSD
+[market_data] backfilled 189 candles for PIUSD
+[market_data] backfilled 122 candles for POLUSD
+[market_data] backfilled 197 candles for PLTRBUSD
+[market_data] backfilled 75 candles for POPCATUSD
+[market_data] backfilled 0 candles for PROVEUSD
+[market_data] backfilled 165 candles for PENGUUSD
+[market_data] backfilled 191 candles for PUMPUSD
+[market_data] backfilled 122 candles for REDUSD
+[market_data] backfilled 200 candles for RAVEUSD
+[market_data] backfilled 155 candles for SAGAUSD
+[market_data] backfilled 191 candles for QQQXUSD
+[market_data] backfilled 198 candles for RIVERUSD
+[market_data] backfilled 1 candles for RAREUSD
+[market_data] backfilled 19 candles for RUNEUSD
+[market_data] backfilled 14 candles for RSRUSD
+[market_data] backfilled 183 candles for RKLBBUSD
+[market_data] backfilled 146 candles for SAHARAUSD
+[market_data] backfilled 75 candles for SIGNUSD
+[market_data] backfilled 175 candles for SEIUSD
+[market_data] backfilled 200 candles for SNDKBUSD
+[market_data] backfilled 196 candles for SKYAIUSD
+[market_data] backfilled 199 candles for SLVONUSD
+[market_data] backfilled 184 candles for SKHYBUSD
+[market_data] backfilled 185 candles for SKLUSD
+[market_data] backfilled 200 candles for SOLUSD
+[market_data] backfilled 200 candles for SIRENUSD
+[market_data] backfilled 111 candles for SOLVUSD
+[market_data] backfilled 184 candles for SONICUSD
+[market_data] backfilled 200 candles for SPCXXUSD
+[market_data] backfilled 0 candles for SOPHUSD
+[market_data] backfilled 198 candles for SOXLBUSD
+[market_data] backfilled 22 candles for STRKUSD
+[market_data] backfilled 186 candles for SPXUSD
+[market_data] backfilled 182 candles for SPYXUSD
+[market_data] backfilled 162 candles for STBLUSD
+[market_data] backfilled 173 candles for STXUSD
+[market_data] backfilled 191 candles for SUIUSD
+[market_data] backfilled 185 candles for SWARMSUSD
+[market_data] backfilled 1 candles for SUNUSD
+[market_data] backfilled 1 candles for SUSD
+[market_data] backfilled 76 candles for SUSHIUSD
+[market_data] backfilled 200 candles for TACUSD
+[market_data] backfilled 188 candles for TAOUSD
+[market_data] backfilled 70 candles for TNSRUSD
+[market_data] backfilled 1 candles for TIAUSD
+[market_data] backfilled 184 candles for TLMUSD
+[market_data] backfilled 179 candles for TOWNSUSD
+[market_data] backfilled 177 candles for TRUMPUSD
+[market_data] backfilled 1 candles for TRBUSD
+[market_data] backfilled 196 candles for TSMBUSD
+[market_data] backfilled 26 candles for TSTUSD
+[market_data] backfilled 200 candles for TSLAXUSD
+[market_data] backfilled 199 candles for UNIUSD
+[market_data] backfilled 75 candles for VANAUSD
+[market_data] backfilled 185 candles for USUALUSD
+[market_data] backfilled 170 candles for TRXUSD
+[market_data] backfilled 106 candles for WCTUSD
+[market_data] backfilled 191 candles for VELVETUSD
+[market_data] backfilled 199 candles for VVVUSD
+[market_data] backfilled 192 candles for WLDUSD
+[market_data] backfilled 167 candles for WIFUSD
+[market_data] backfilled 151 candles for XAIUSD
+[market_data] backfilled 200 candles for XANUSD
+[market_data] backfilled 166 candles for VIRTUALUSD
+[market_data] backfilled 52 candles for WLFIUSD
+[market_data] backfilled 182 candles for WDCBUSD
+[market_data] backfilled 193 candles for XLMUSD
+[market_data] backfilled 134 candles for XMRUSD
+[market_data] backfilled 200 candles for XRPUSD
+[market_data] backfilled 182 candles for XPLUSD
+[market_data] backfilled 102 candles for ZROUSD
+[market_data] backfilled 0 candles for ZORAUSD
+[market_data] backfilled 130 candles for ZENUSD
+[market_data] backfilled 200 candles for ZECUSD
+[market_data] backfilled 156 candles for ZKUSD
+[market_data] backfilled 200 candles for XAUTUSD
+ * Serving Flask app 'app'
+ * Debug mode: off
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5002
+ * Running on http://187.127.130.77:5002
+Press CTRL+C to quit
+[market_data] ws connected, subscribing 220 symbols in chunks of 50
+(venv) root@srv1489298:/var/www/delta-service# cd /var/www/delta-servicece
+source venv/bin/activate
+
+pm2 start app.py \
+  --name delta-service \
+  --interpreter /var/www/delta-service/venv/bin/python
+
+pm2 save
+pm2 list
+[PM2] Starting /var/www/delta-service/app.py in fork_mode (1 instance)
+[PM2] Done.
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 1  │ delta-service      │ fork     │ 0    │ online    │ 0%       │ 6.7mb    │
+│ 0  │ elixirgold_fronte… │ fork     │ 13   │ online    │ 0%       │ 89.1mb   │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+[PM2] Saving current process list...
+[PM2] Successfully saved in /root/.pm2/dump.pm2
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 1  │ delta-service      │ fork     │ 0    │ online    │ 0%       │ 48.9mb   │
+│ 0  │ elixirgold_fronte… │ fork     │ 13   │ online    │ 0%       │ 89.1mb   │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+(venv) root@srv1489298:/var/www/delta-service# pm2 logs delta-service --lines 30
+[TAILING] Tailing last 30 lines for [delta-service] process (change the value with --lines option)
+/root/.pm2/logs/delta-service-error.log last 30 lines:
+1|delta-se | WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+1|delta-se |  * Running on all addresses (0.0.0.0)
+1|delta-se |  * Running on http://127.0.0.1:5002
+1|delta-se |  * Running on http://187.127.130.77:5002
+1|delta-se | Press CTRL+C to quit
+
+/root/.pm2/logs/delta-service-out.log last 30 lines:
+1|delta-se | [market_data] backfilled 199 candles for TSLAXUSD
+1|delta-se | [market_data] backfilled 170 candles for TRXUSD
+1|delta-se | [market_data] backfilled 26 candles for TSTUSD
+1|delta-se | [market_data] backfilled 200 candles for UNIUSD
+1|delta-se | [market_data] backfilled 75 candles for VANAUSD
+1|delta-se | [market_data] backfilled 185 candles for USUALUSD
+1|delta-se | [market_data] backfilled 168 candles for TRUMPUSD
+1|delta-se | [market_data] backfilled 198 candles for VVVUSD
+1|delta-se | [market_data] backfilled 166 candles for VIRTUALUSD
+1|delta-se | [market_data] backfilled 106 candles for WCTUSD
+1|delta-se | [market_data] backfilled 167 candles for WIFUSD
+1|delta-se | [market_data] backfilled 182 candles for WDCBUSD
+1|delta-se | [market_data] backfilled 198 candles for VELVETUSD
+1|delta-se | [market_data] backfilled 192 candles for WLDUSD
+1|delta-se | [market_data] backfilled 52 candles for WLFIUSD
+1|delta-se | [market_data] backfilled 151 candles for XAIUSD
+1|delta-se | [market_data] backfilled 198 candles for XANUSD
+1|delta-se | [market_data] backfilled 193 candles for XLMUSD
+1|delta-se | [market_data] backfilled 200 candles for XAUTUSD
+1|delta-se | [market_data] backfilled 200 candles for XRPUSD
+1|delta-se | [market_data] backfilled 132 candles for XMRUSD
+1|delta-se | [market_data] backfilled 182 candles for XPLUSD
+1|delta-se | [market_data] backfilled 130 candles for ZENUSD
+1|delta-se | [market_data] backfilled 200 candles for ZECUSD
+1|delta-se | [market_data] backfilled 0 candles for ZORAUSD
+1|delta-se | [market_data] backfilled 102 candles for ZROUSD
+1|delta-se | [market_data] backfilled 156 candles for ZKUSD
+1|delta-se |  * Serving Flask app 'app'
+1|delta-se |  * Debug mode: off
+1|delta-se | [market_data] ws connected, subscribing 220 symbols in chunks of 50
+
+curl http://127.0.0.1:5002/health
+^C
+(venv) root@srv1489298:/var/www/delta-service# curl http://127.0.0.1:5002/health
+{"clock":{"drift_seconds":-0.69,"ok":true},"dry_run":false,"status":"ok","watchlist":["1000BONKUSD","1000FLOKIUSD","1000PEPEUSD","1000SATSUSD","1000SHIBUSD","1MBABYDOGEUSD","AAPLXUSD","AAVEUSD","ACTUSD","ADAUSD","AIGENSYNUSD","AINUSD","AIOTUSD","AIOUSD","AIXBTUSD","AKEUSD","ALLOUSD","ALTUSD","AMDBUSD","AMZNXUSD","API3USD","APTUSD","ARBUSD","ARCUSD","ARIAUSD","ARMBUSD","ARUSD","ASTERUSD","AUCTIONUSD","AVAAIUSD","AVAXUSD","AXSUSD","BABABUSD","BANKUSD","BASEDUSD","BBUSD","BCHUSD","BEATUSD","BERAUSD","BILLUSD","BIOUSD","BLESSUSD","BLURUSD","BMTUSD","BNBUSD","BTCUSD","BUSD","CAKEUSD","CBRSBUSD","CHIPUSD","COAIUSD","COINXUSD","COOKIEUSD","CRCLXUSD","CROSSUSD","DASHUSD","DEEPUSD","DOGEUSD","DOGSUSD","DOTUSD","DRAMBUSD","DUSKUSD","DYDXUSD","EDENUSD","EIGENUSD","ENAUSD","ENJUSD","ESPORTSUSD","ETCUSD","ETHFIUSD","ETHUSD","EVAAUSD","EWYBUSD","FARTCOINUSD","FFUSD","FILUSD","FRAXUSD","GALAUSD","GIGGLEUSD","GLMUSD","GOATUSD","GOOGLXUSD","GRAMUSD","GRIFFAINUSD","HANAUSD","HBARUSD","HIVEUSD","HOODBUSD","HUSD","HYPEUSD","INITUSD","INJUSD","INTCBUSD","INUSD","IOTAUSD","IOUSD","JASMYUSD","JTOUSD","JUPUSD","KAITOUSD","KITEUSD","KSMUSD","LABUSD","LAYERUSD","LDOUSD","LIGHTUSD","LINKUSD","LISTAUSD","LITEBUSD","LITUSD","LTCUSD","MANAUSD","MANTAUSD","MASKUSD","MELANIAUSD","MEMEUSD","METAXUSD","MEUSD","MMTUSD","MONUSD","MOODENGUSD","MOVEUSD","MRVLBUSD","MSTRBUSD","MUBARAKUSD","MUBUSD","MUSD","NBISBUSD","NEARUSD","NEIROUSD","NOTUSD","NVDAXUSD","ONDOUSD","OPNUSD","OPUSD","ORDERUSD","ORDIUSD","PARTIUSD","PAXGUSD","PENDLEUSD","PENGUUSD","PEOPLEUSD","PIEVERSEUSD","PIPPINUSD","PIUSD","PLTRBUSD","PNUTUSD","POLUSD","POPCATUSD","PROVEUSD","PUMPUSD","QQQXUSD","RAREUSD","RAVEUSD","REDUSD","RIVERUSD","RKLBBUSD","RSRUSD","RUNEUSD","SAGAUSD","SAHARAUSD","SEIUSD","SIGNUSD","SIRENUSD","SKHYBUSD","SKLUSD","SKYAIUSD","SLVONUSD","SNDKBUSD","SOLUSD","SOLVUSD","SONICUSD","SOPHUSD","SOXLBUSD","SPCXXUSD","SPXUSD","SPYXUSD","STBLUSD","STRKUSD","STXUSD","SUIUSD","SUNUSD","SUSD","SUSHIUSD","SWARMSUSD","TACUSD","TAOUSD","TIAUSD","TLMUSD","TNSRUSD","TOWNSUSD","TRBUSD","TRUMPUSD","TRXUSD","TSLAXUSD","TSMBUSD","TSTUSD","UNIUSD","USUALUSD","VANAUSD","VELVETUSD","VIRTUALUSD","VVVUSD","WCTUSD","WDCBUSD","WIFUSD","WLDUSD","WLFIUSD","XAIUSD","XANUSD","XAUTUSD","XLMUSD","XMRUSD","XPLUSD","XRPUSD","ZECUSD","ZENUSD","ZKUSD","ZORAUSD","ZROUSD"]}
+(venv) root@srv1489298:/var/www/delta-service#

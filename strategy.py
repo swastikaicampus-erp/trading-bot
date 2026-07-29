@@ -6,66 +6,54 @@ perpetual futures) continuously scan karta hai, DONO directions mein:
 
     LONG (buy) setup:
         1. ADX(14) >= adx_threshold -> trending, not choppy
-        2. EMA(fast) crosses ABOVE EMA(slow) -> bullish entry trigger
-        3. RSI(14) between rsi_floor and rsi_overbought -> bullish momentum
-        4. Price > VWAP (session VWAP, UTC-day)
-        5. Candle volume > volume_multiplier x rolling average volume
+        2. ADX rising (vs previous bar) -> trend strengthening (optional gate)
+        3. EMA(fast) crosses ABOVE EMA(slow) on the latest CLOSED relationship
+        4. RSI(14) between rsi_floor and rsi_overbought -> bullish momentum
+        5. Price > VWAP (session VWAP, UTC-day)
+        6. Candle volume > volume_multiplier x rolling average volume
 
     SHORT (sell) setup -- bilkul mirror image:
-        1. ADX(14) >= adx_threshold -> trending, not choppy
-        2. EMA(fast) crosses BELOW EMA(slow) -> bearish entry trigger
-        3. RSI(14) between rsi_short_floor and rsi_short_ceiling -> bearish momentum
-        4. Price < VWAP (session VWAP, UTC-day)
-        5. Candle volume > volume_multiplier x rolling average volume
+        1. ADX(14) >= adx_threshold
+        2. ADX rising
+        3. EMA(fast) crosses BELOW EMA(slow)
+        4. RSI between rsi_short_floor and rsi_short_ceiling
+        5. Price < VWAP
+        6. Volume surge
 
 Jitne bhi symbols in saari conditions ko (kisi bhi ek direction mein)
 pass karte hain unme se SABSE ZYADA SCORE wale symbol me hi trade li
 jaati hai -- baaki qualifying symbols sirf "candidates" list me dikhte
-hain, trade nahi hoti jab tak unka number na aaye.
+hain.
 
-HAR symbol (chahe qualify kare ya na kare) ka diagnostic snapshot
-`last_scan` me store hota hai -- taaki frontend par poora grid dikhaya
-ja sake (kaunsi condition pass hui, kaunsi fail, live score, direction)
-na ki sirf jo abhi qualify kar rahe hain.
+HAR symbol ka diagnostic snapshot `last_scan` me store hota hai --
+frontend scan grid ke liye.
 
-Rules jo implement kiye hain:
-  - Din bhar me max `max_trades_per_day` trades total -- GLOBAL,
-    sabhi symbols aur dono directions milakar (per-symbol nahi).
-  - Normally sirf 1 trade open rehta hai ek time pe.
-  - System max `max_concurrent_trades` (default 2) trades EK SAATH
-    chala sakta hai -- ye hard cap hai, norm nahi. Long aur short dono
-    ek saath alag symbols par khul sakte hain is limit ke andar.
-  - Jab koi open trade close ho (SL ya target hit -- exchange khud
-    karta hai bracket order ke through), tabhi agla best-scoring
-    candidate liya jaata hai.
-  - Entry ke saath hi SL + target ek hi bracket order call me attach
-    hote hain, taaki exchange khud exit manage kare -- humein sirf
-    ye poll karna hai ki position abhi bhi open hai ya band ho gayi.
+Rules:
+  - max_trades_per_day GLOBAL (sab symbols + dono directions)
+  - max_concurrent_trades hard cap (default 2)
+  - Bracket SL+TP entry ke saath; monitor sirf position close detect karta hai
+  - dry_run me simulated SL/TP exit (slots free hote rehte hain)
 
-BUGFIXES (is version me):
-  - Low-price coins (e.g. RSRUSD ~$0.0003) ke liye smart/dynamic decimal
-    rounding -- pehle round(x, 2) se SL/TP 0.00 ban jaate the, Delta
-    reject kar deta tha.
-  - Qty calculation par notional-based sanity cap -- pehle tiny price se
-    divide karne par astronomically bada qty ban jaata tha.
-  - Order fail hone par (ya error aane par) trade `open_trades` me
-    COMMIT NAHI hoti -- pehle phantom entry ban jaati thi jo slot block
-    kar deti thi bina real position ke. Fail hone par symbol short
-    cooldown (`failed_retry_cooldown_sec`) me chala jaata hai taaki
-    turant wahi symbol dobara try na ho.
-  - NAYA: SHORT (sell) side add kiya gaya -- pehle sirf LONG (buy) hoti
-    thi. Ab bearish EMA cross + RSI + VWAP + volume conditions bhi
-    scan hoti hain, aur SL/TP/side sab direction-aware hain.
-
-ASSUMPTION -- score formula (config se tune ho sakta hai):
-    score = 0.45*adx_strength + 0.30*volume_surge + 0.25*rsi_position
-    Higher = zyada strong trend + zyada conviction (dono directions me).
+BUGFIXES / IMPROVEMENTS (is version):
+  - contract_value open_trades me store + exit PnL me multiply
+  - Exit price: live mark/last se SL vs TP infer (tp or sl blind pick nahi)
+  - dry_run simulated exit on candle price vs SL/TP
+  - monitor loop self.running respect karta hai
+  - failed_symbols prune after cooldown
+  - qty floor pe warning log jab risk_pct exceed ho
+  - last_scan writes lock-protected
+  - score: direction=None pe neutral RSI mid (50)
+  - optional require_adx_rising filter (default True)
+  - min_ema_separation_pct: micro-cross noise filter
+  - CRITICAL: startup pe exchange positions recover (_sync_open_positions)
+  - CRITICAL: open_trades saari access copy-under-lock (race-safe)
+  - CRITICAL: live entry pe fill price extract + SL/TP actual entry se recalc
+  - basic order status reject check
 
 SAFETY
-    - `dry_run` True rehta hai jab tak explicitly False na kiya jaaye.
-    - Position sizing aur PnL contract_value-aware hain (Delta pe 1
-      "contract" 1 unit underlying nahi hota).
-    - Ye ek template hai, investment advice nahi.
+  - dry_run True by default
+  - Position sizing + PnL contract_value-aware
+  - Template only -- investment advice nahi
 """
 
 import os
@@ -91,60 +79,66 @@ DEFAULT_CONFIG = {
     "rsi_floor": 40,
     "rsi_overbought": 75,
 
-    # momentum filter -- SHORT side (mirror of long; tune independently
-    # if you want asymmetric bearish sensitivity)
+    # momentum filter -- SHORT side
     "rsi_short_floor": 25,
     "rsi_short_ceiling": 60,
 
     # trend filter
     "adx_period": 14,
-    "adx_threshold": 20,
+    "adx_threshold": 22,          # slightly stricter than 20 (less chop)
+    "require_adx_rising": True,   # ADX must be >= previous bar
+
+    # avoid microscopic EMA crosses (price % separation after cross)
+    "min_ema_separation_pct": 0.05,  # 0.05% of price; 0 = disabled
 
     # volume filter
     "volume_lookback": 20,
-    "volume_multiplier": 1.2,
+    "volume_multiplier": 1.5,     # slightly stricter than 1.2
 
     # vwap filter
     "vwap_filter": True,
 
     # position sizing -- risk-based
-    "capital": 50000,          # quote currency (USD)
+    "capital": 50000,
     "risk_pct": 1.0,
     "stop_loss_pct": 0.5,
     "target_pct": 1.0,
-    "max_leverage": 3,         # notional sanity cap = capital * max_leverage
+    "max_leverage": 3,
 
     # direction control
     "allow_long": True,
     "allow_short": True,
 
-    # portfolio-level limits (GLOBAL, symbol-wise nahi, direction-wise nahi)
+    # portfolio-level limits
     "max_trades_per_day": 4,
     "max_concurrent_trades": 2,
-    "max_daily_loss": 1000,    # USD -- circuit breaker
+    "max_daily_loss": 1000,
 
     "scan_interval_sec": 5,
     "monitor_interval_sec": 10,
-    "failed_retry_cooldown_sec": 300,   # order-fail hone par retry se pehle wait
+    "failed_retry_cooldown_sec": 300,
 
-    "dry_run": True,           # SAFETY DEFAULT
+    # dry-run: max hold time (sec) before force-close simulation if SL/TP not hit
+    "dry_run_max_hold_sec": 3600,
+
+    "dry_run": True,
 }
 
-# Config keys jo frontend se edit karwane layak hain (baaki internal-only)
 EDITABLE_CONFIG_KEYS = [
     "fast_ema", "slow_ema", "rsi_period", "rsi_floor", "rsi_overbought",
     "rsi_short_floor", "rsi_short_ceiling",
-    "adx_period", "adx_threshold", "volume_lookback", "volume_multiplier",
+    "adx_period", "adx_threshold", "require_adx_rising", "min_ema_separation_pct",
+    "volume_lookback", "volume_multiplier",
     "vwap_filter", "capital", "risk_pct", "stop_loss_pct", "target_pct",
     "max_leverage", "allow_long", "allow_short",
     "max_trades_per_day", "max_concurrent_trades",
     "max_daily_loss", "scan_interval_sec", "monitor_interval_sec",
-    "failed_retry_cooldown_sec",
+    "failed_retry_cooldown_sec", "dry_run_max_hold_sec",
 ]
 
 
 # ---------------------------------------------------------------------
-# Indicators -- dependency-light, same as Kotak Neo version
+# Indicators
 # ---------------------------------------------------------------------
 def ema(values, period):
     if not values:
@@ -232,9 +226,6 @@ def adx(highs, lows, closes, period=14):
 
 
 def _smart_round(price, sig_digits=5):
-    """Low-price coins (RSRUSD ~$0.0003) ke liye 0.00 na bane -- price
-    magnitude ke hisaab se decimal places adjust karta hai. Normal
-    price (>= 1) ke liye simple 2-decimal rounding hi rehti hai."""
     if price is None or price == 0:
         return price
     if price >= 1:
@@ -244,17 +235,9 @@ def _smart_round(price, sig_digits=5):
 
 
 # ---------------------------------------------------------------------
-# product info resolution -- symbol -> {product_id, contract_value}
+# product info
 # ---------------------------------------------------------------------
 def resolve_product_info(client, symbols, use_cache=True):
-    """
-    Resolves symbol -> {"product_id": int, "contract_value": float} by
-    calling client.get_products() once and caching to disk.
-
-    contract_value matters because on Delta, 1 "contract" is NOT 1 unit
-    of the underlying asset. Position sizing and PnL must be multiplied
-    by this or both will be wrong by orders of magnitude.
-    """
     cached = {}
     if use_cache and os.path.exists(PRODUCT_INFO_CACHE_FILE):
         try:
@@ -303,7 +286,6 @@ def resolve_product_info(client, symbols, use_cache=True):
 
 
 def _today_vwap(candles):
-    """Aaj (UTC) ke candles se hi VWAP nikalta hai -- stateless."""
     today = datetime.now(timezone.utc).date()
     pv, vol = 0.0, 0.0
     for c in candles:
@@ -322,18 +304,14 @@ def _today_vwap(candles):
 
 
 def compute_diagnostics(symbol, candles, config):
-    """
-    Poora diagnostic snapshot return karta hai -- HAR symbol ke liye,
-    chahe strategy ki conditions match ho ya na ho (kisi bhi direction
-    me). Ye frontend ke "scan grid" (saare stocks + har condition ka
-    ✓/✗) ka data source hai.
-
-    'qualifies' == True hone par hi ye symbol trade ka candidate banta
-    hai (sabse zyada score wale candidate ko hi actual trade milti hai).
-    'direction' batata hai kaunsa side qualify hua -- "long", "short",
-    ya None agar dono me se koi nahi.
-    """
     need = max(config["slow_ema"], config["rsi_period"], config["adx_period"] * 2) + 2
+    empty_conditions = {
+        "cross_up": False, "cross_down": False, "trend_aligned": False,
+        "adx_ok": False, "adx_rising": False,
+        "rsi_long_ok": False, "rsi_short_ok": False,
+        "vwap_long_ok": False, "vwap_short_ok": False, "volume_ok": False,
+        "ema_sep_ok": False,
+    }
     if len(candles) < need:
         return {
             "symbol": symbol,
@@ -343,11 +321,7 @@ def compute_diagnostics(symbol, candles, config):
             "score": 0,
             "price": candles[-1]["close"] if candles else None,
             "adx": None, "rsi": None, "volume_ratio": None, "vwap": None,
-            "conditions": {
-                "cross_up": False, "cross_down": False, "trend_aligned": False,
-                "adx_ok": False, "rsi_long_ok": False, "rsi_short_ok": False,
-                "vwap_long_ok": False, "vwap_short_ok": False, "volume_ok": False,
-            },
+            "conditions": empty_conditions,
         }
 
     closes = [c["close"] for c in candles]
@@ -364,17 +338,33 @@ def compute_diagnostics(symbol, candles, config):
     prev_slow, curr_slow = slow[-2], slow[-1]
     curr_rsi = rsi_vals[-1]
     curr_adx = adx_vals[-1]
+    prev_adx = adx_vals[-2] if len(adx_vals) >= 2 else None
     curr_price = closes[-1]
 
-    # -- direction triggers ------------------------------------------------
-    fresh_cross_up = prev_fast <= prev_slow and curr_fast > curr_slow      # bullish
-    fresh_cross_down = prev_fast >= prev_slow and curr_fast < curr_slow    # bearish
-    trend_aligned = curr_fast > curr_slow  # display only -- long-biased alignment
+    fresh_cross_up = prev_fast <= prev_slow and curr_fast > curr_slow
+    fresh_cross_down = prev_fast >= prev_slow and curr_fast < curr_slow
+    trend_aligned = curr_fast > curr_slow
 
     trend_ok = curr_adx is not None and curr_adx >= config["adx_threshold"]
+    adx_rising = (
+        curr_adx is not None and prev_adx is not None and curr_adx >= prev_adx
+    )
+    adx_rising_ok = (not config.get("require_adx_rising", True)) or adx_rising
 
-    rsi_long_ok = curr_rsi is not None and (config["rsi_floor"] <= curr_rsi < config["rsi_overbought"])
-    rsi_short_ok = curr_rsi is not None and (config["rsi_short_floor"] < curr_rsi <= config["rsi_short_ceiling"])
+    # micro-cross filter: fast/slow separation as % of price
+    min_sep = float(config.get("min_ema_separation_pct", 0) or 0)
+    if min_sep > 0 and curr_price:
+        sep_pct = abs(curr_fast - curr_slow) / curr_price * 100.0
+        ema_sep_ok = sep_pct >= min_sep
+    else:
+        ema_sep_ok = True
+
+    rsi_long_ok = curr_rsi is not None and (
+        config["rsi_floor"] <= curr_rsi < config["rsi_overbought"]
+    )
+    rsi_short_ok = curr_rsi is not None and (
+        config["rsi_short_floor"] < curr_rsi <= config["rsi_short_ceiling"]
+    )
 
     vwap = _today_vwap(candles) if config["vwap_filter"] else None
     vwap_long_ok = (not config["vwap_filter"]) or vwap is None or curr_price > vwap
@@ -388,15 +378,15 @@ def compute_diagnostics(symbol, candles, config):
 
     long_qualifies = bool(
         config.get("allow_long", True)
-        and fresh_cross_up and trend_ok and rsi_long_ok and vwap_long_ok and volume_ok
+        and fresh_cross_up and trend_ok and adx_rising_ok and ema_sep_ok
+        and rsi_long_ok and vwap_long_ok and volume_ok
     )
     short_qualifies = bool(
         config.get("allow_short", True)
-        and fresh_cross_down and trend_ok and rsi_short_ok and vwap_short_ok and volume_ok
+        and fresh_cross_down and trend_ok and adx_rising_ok and ema_sep_ok
+        and rsi_short_ok and vwap_short_ok and volume_ok
     )
 
-    # Ek hi candle par dono trigger nahi ho sakte (cross_up aur cross_down
-    # mutually exclusive hain), lekin safety ke liye long ko priority.
     if long_qualifies:
         direction = "long"
     elif short_qualifies:
@@ -413,9 +403,12 @@ def compute_diagnostics(symbol, candles, config):
         if direction == "short":
             rsi_mid = (config["rsi_short_floor"] + config["rsi_short_ceiling"]) / 2
             rsi_span = max(config["rsi_short_ceiling"] - rsi_mid, 1)
-        else:
+        elif direction == "long":
             rsi_mid = (config["rsi_floor"] + config["rsi_overbought"]) / 2
             rsi_span = max(rsi_mid - config["rsi_floor"], 1)
+        else:
+            # neutral for non-qualifying grid rows
+            rsi_mid, rsi_span = 50.0, 50.0
         rsi_score = 1.0 - min(abs(curr_rsi - rsi_mid) / rsi_span, 1.0)
         score = round(adx_score * 0.45 + vol_score * 0.30 + rsi_score * 0.25, 4)
 
@@ -432,11 +425,13 @@ def compute_diagnostics(symbol, candles, config):
             "cross_down": fresh_cross_down,
             "trend_aligned": trend_aligned,
             "adx_ok": trend_ok,
+            "adx_rising": adx_rising,
             "rsi_long_ok": rsi_long_ok,
             "rsi_short_ok": rsi_short_ok,
             "vwap_long_ok": vwap_long_ok,
             "vwap_short_ok": vwap_short_ok,
             "volume_ok": volume_ok,
+            "ema_sep_ok": ema_sep_ok,
         },
         "qualifies": qualifies,
         "direction": direction,
@@ -445,9 +440,7 @@ def compute_diagnostics(symbol, candles, config):
 
 
 # ---------------------------------------------------------------------
-# StrategyManager -- GLOBAL scanner, ab poore perpetual-futures universe
-# par (watchlist = saare live perps, app.py discover karta hai).
-# Dono directions (long + short) support karta hai.
+# StrategyManager
 # ---------------------------------------------------------------------
 class StrategyManager:
     def __init__(self, feed, client, watchlist, config=None, place_order_fn=None):
@@ -455,13 +448,6 @@ class StrategyManager:
         self.client = client
         self.symbols = list(watchlist)
         self.config = {**DEFAULT_CONFIG, **(config or {})}
-
-        # delta_rest_client's place_order() does NOT support bracket_* kwargs
-        # (confirmed: "unexpected keyword argument 'bracket_stop_loss_price'").
-        # Bracket orders must go through the raw signed /v2/orders POST, same
-        # as app.py already does for /place-order and /positions/close. This
-        # callable is injected from app.py so the HMAC signing logic lives in
-        # exactly one place instead of being duplicated here.
         self.place_order_fn = place_order_fn
 
         self.product_info = resolve_product_info(client, self.symbols)
@@ -471,22 +457,25 @@ class StrategyManager:
         self.monitor_thread = None
         self.lock = threading.Lock()
 
-        self.open_trades = {}      # symbol -> trade dict (SIRF confirmed/dry-run orders)
-        self.failed_symbols = {}   # symbol -> last-fail unix timestamp (retry cooldown)
+        self.open_trades = {}
+        self.failed_symbols = {}
         self.trades_today = 0
         self.realized_pnl_today = 0.0
         self.day_marker = datetime.now(timezone.utc).date()
-        self.last_scan = {}        # symbol -> latest diagnostics (UI grid ke liye, SAARE symbols)
+        self.last_scan = {}
         self.trade_log = []
 
     # -- lifecycle -----------------------------------------------------
     def start(self, symbol=None):
-        # symbol param backward-compat ke liye rakha hai, ignore hota
-        # hai -- ab global scan hoti hai, single-symbol start nahi.
         with self.lock:
             if self.running:
                 return
             self.running = True
+
+        # Recover any positions already open on the exchange before
+        # scan/monitor threads start (critical for live restarts).
+        self._sync_open_positions()
+
         self.scan_thread = threading.Thread(target=self._scan_loop, daemon=True)
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.scan_thread.start()
@@ -499,8 +488,6 @@ class StrategyManager:
         logger.info("Strategy scanner stopped (open positions exchange par as-is rahengi)")
 
     def add_symbols(self, symbols):
-        """Runtime me naye symbols watchlist me add karne ke liye (e.g.
-        /watchlist/sync se naya listed perpetual future mila)."""
         new_syms = [s for s in symbols if s not in self.symbols]
         if not new_syms:
             return
@@ -522,16 +509,110 @@ class StrategyManager:
             self.trades_today = 0
             self.realized_pnl_today = 0.0
 
-    # -- scanning loop -----------------------------------------------------
+    def _prune_failed_symbols(self):
+        cooldown = self.config.get("failed_retry_cooldown_sec", 300)
+        now = time.time()
+        with self.lock:
+            self.failed_symbols = {
+                s: t for s, t in self.failed_symbols.items() if now - t < cooldown
+            }
+
+    # -- position recovery (CRITICAL) ---------------------------------
+    def _sync_open_positions(self):
+        """Best-effort recovery of positions that already exist on the exchange.
+
+        Uses per-product get_position. Recovered trades have sl_price/tp_price=None
+        (brackets unknown); monitor only waits for size==0 and uses mark/last for PnL.
+        Does NOT increment trades_today.
+        """
+        recovered = 0
+        for symbol, info in list(self.product_info.items()):
+            pid = info.get("product_id")
+            if not pid:
+                continue
+            try:
+                position = self.client.get_position(pid)
+                pos = position.get("result", position) if isinstance(position, dict) else position
+                if not isinstance(pos, dict):
+                    continue
+                raw_size = pos.get("size", 0)
+                try:
+                    size = float(raw_size) if raw_size is not None else 0.0
+                except (TypeError, ValueError):
+                    size = 0.0
+                if size == 0:
+                    continue
+
+                direction = "long" if size > 0 else "short"
+                side = "buy" if direction == "long" else "sell"
+                qty = max(abs(int(size)), 1)
+
+                entry_price = None
+                for k in ("entry_price", "average_entry_price", "avg_entry_price",
+                          "open_price", "average_open_price"):
+                    if pos.get(k) is not None:
+                        try:
+                            entry_price = float(pos[k])
+                            break
+                        except (TypeError, ValueError):
+                            pass
+                if entry_price is None:
+                    candles = self.feed.get_candles(symbol, limit=2)
+                    if candles:
+                        entry_price = candles[-1]["close"]
+                if entry_price is None:
+                    logger.warning(
+                        "Recovered position for %s but no entry price available — skipping track",
+                        symbol,
+                    )
+                    continue
+
+                contract_value = float(info.get("contract_value", 1.0) or 1.0)
+
+                with self.lock:
+                    if symbol in self.open_trades:
+                        continue
+                    self.open_trades[symbol] = {
+                        "direction": direction,
+                        "side": side,
+                        "product_id": pid,
+                        "contract_value": contract_value,
+                        "entry_price": entry_price,
+                        "qty": qty,
+                        "sl_price": None,
+                        "tp_price": None,
+                        "entry_time": datetime.now(timezone.utc).isoformat(),
+                        "entry_ts": time.time(),
+                        "score": None,
+                        "order_result": {"recovered": True},
+                        "recovered": True,
+                    }
+                recovered += 1
+                logger.info(
+                    "RECOVERED open position %s [%s] qty=%s entry≈%s",
+                    symbol, direction, qty, entry_price,
+                )
+            except Exception as e:
+                logger.warning("Could not sync position for %s: %s", symbol, e)
+
+        if recovered:
+            logger.info("Synced %d existing position(s) from exchange", recovered)
+
+    # -- scanning ------------------------------------------------------
     def _scan_loop(self):
         while self.running:
             try:
                 self._roll_day_if_needed()
+                self._prune_failed_symbols()
                 self._scan_all_symbols()
 
-                slots_free = len(self.open_trades) < self.config["max_concurrent_trades"]
-                trades_left = self.trades_today < self.config["max_trades_per_day"]
-                loss_ok = self.realized_pnl_today > -abs(self.config["max_daily_loss"])
+                with self.lock:
+                    n_open = len(self.open_trades)
+                    trades_today = self.trades_today
+                    realized = self.realized_pnl_today
+                slots_free = n_open < self.config["max_concurrent_trades"]
+                trades_left = trades_today < self.config["max_trades_per_day"]
+                loss_ok = realized > -abs(self.config["max_daily_loss"])
                 if slots_free and trades_left and loss_ok:
                     self._maybe_enter_best_candidate()
             except Exception:
@@ -539,10 +620,7 @@ class StrategyManager:
             time.sleep(self.config["scan_interval_sec"])
 
     def _scan_all_symbols(self):
-        """Har symbol ke liye diagnostics compute karke last_scan me
-        store karta hai -- chahe wo qualify kare ya na kare (kisi bhi
-        direction me). Ye frontend grid ka poora data source hai."""
-        for symbol in self.symbols:
+        for symbol in list(self.symbols):
             info = self.product_info.get(symbol)
             if not info or not info.get("product_id"):
                 continue
@@ -550,7 +628,8 @@ class StrategyManager:
             if not candles:
                 continue
             diag = compute_diagnostics(symbol, candles, self.config)
-            self.last_scan[symbol] = diag
+            with self.lock:
+                self.last_scan[symbol] = diag
 
     def _maybe_enter_best_candidate(self):
         cooldown_sec = self.config.get("failed_retry_cooldown_sec", 300)
@@ -558,9 +637,10 @@ class StrategyManager:
         with self.lock:
             open_symbols = set(self.open_trades.keys())
             cooling_down = {s for s, t in self.failed_symbols.items() if now - t < cooldown_sec}
+            scan_snapshot = dict(self.last_scan)
 
         candidates = [
-            diag for symbol, diag in self.last_scan.items()
+            diag for symbol, diag in scan_snapshot.items()
             if diag.get("qualifies")
             and symbol not in open_symbols
             and symbol not in cooling_down
@@ -568,20 +648,58 @@ class StrategyManager:
         if not candidates:
             return
 
-        # Long aur short dono candidates ek hi pool me compete karte hain --
-        # sabse zyada SCORE wala jeetta hai, chahe wo kisi bhi direction ka ho.
         best = max(candidates, key=lambda s: s["score"])
         self._enter_trade(best)
 
-    # -- entry -------------------------------------------------------------
+    # -- entry ---------------------------------------------------------
+    def _extract_fill_price(self, order_result, fallback):
+        """Best-effort average fill price from exchange order response."""
+        if not isinstance(order_result, dict):
+            return fallback
+
+        candidates = [order_result]
+        for nest_key in ("result", "order", "data"):
+            nested = order_result.get(nest_key)
+            if isinstance(nested, dict):
+                candidates.append(nested)
+
+        for obj in candidates:
+            for key in (
+                "average_fill_price", "average_price", "avg_fill_price",
+                "fill_price", "avg_price", "price",
+            ):
+                val = obj.get(key)
+                if val is not None:
+                    try:
+                        p = float(val)
+                        if p > 0:
+                            return p
+                    except (TypeError, ValueError):
+                        pass
+        return fallback
+
+    def _order_looks_rejected(self, order_result):
+        if not isinstance(order_result, dict):
+            return False
+        if order_result.get("error"):
+            return True
+        status = str(
+            order_result.get("status")
+            or order_result.get("state")
+            or (order_result.get("result") or {}).get("status")
+            or (order_result.get("result") or {}).get("state")
+            or ""
+        ).lower()
+        return status in ("rejected", "cancelled", "canceled", "failed", "expired")
+
     def _enter_trade(self, sig):
         symbol = sig["symbol"]
-        direction = sig["direction"]          # "long" ya "short"
+        direction = sig["direction"]
         side = "buy" if direction == "long" else "sell"
 
         info = self.product_info[symbol]
         product_id = info["product_id"]
-        contract_value = info.get("contract_value", 1.0)
+        contract_value = float(info.get("contract_value", 1.0) or 1.0)
         entry_price = sig["price"]
 
         risk_amount = self.config["capital"] * (self.config["risk_pct"] / 100)
@@ -589,9 +707,13 @@ class StrategyManager:
         loss_per_contract = sl_move * contract_value
         qty = max(int(risk_amount // loss_per_contract), 1) if loss_per_contract > 0 else 1
 
-        # --- Sanity cap: notional exposure kabhi bhi capital * max_leverage
-        # se zyada na ho. Ye tiny-price coins (jahan qty astronomically
-        # bada ban jaata tha) ke against safety net hai. ---
+        # warn if floor forces more risk than risk_pct
+        if loss_per_contract > 0 and qty * loss_per_contract > risk_amount * 1.05:
+            logger.warning(
+                "qty floor=1 exceeds risk_pct for %s: risk≈%.2f vs budget %.2f",
+                symbol, qty * loss_per_contract, risk_amount,
+            )
+
         max_notional = self.config["capital"] * self.config.get("max_leverage", 3)
         notional_per_contract = entry_price * contract_value
         if notional_per_contract > 0:
@@ -599,55 +721,76 @@ class StrategyManager:
             if notional > max_notional:
                 qty = max(int(max_notional // notional_per_contract), 1)
 
-        # --- Direction-aware SL/TP, dynamic precision rounding ---
         if direction == "long":
             sl_price = _smart_round(entry_price * (1 - self.config["stop_loss_pct"] / 100))
             tp_price = _smart_round(entry_price * (1 + self.config["target_pct"] / 100))
-        else:  # short
+        else:
             sl_price = _smart_round(entry_price * (1 + self.config["stop_loss_pct"] / 100))
             tp_price = _smart_round(entry_price * (1 - self.config["target_pct"] / 100))
 
         order_result = self._place_bracket_entry(product_id, qty, side, sl_price, tp_price)
 
-        # --- Order fail/error hua to open_trades me COMMIT NAHI karna
-        # (phantom trade fix) -- symbol ko cooldown me daal do taaki
-        # turant wahi symbol dobara try na ho. ---
-        if isinstance(order_result, dict) and order_result.get("error"):
+        if isinstance(order_result, dict) and (
+            order_result.get("error") or self._order_looks_rejected(order_result)
+        ):
             with self.lock:
                 self.failed_symbols[symbol] = time.time()
             self._log_trade("ENTRY_FAILED", symbol, entry_price, qty, sig, order_result)
-            logger.warning("ENTRY FAILED %s (%s): %s", symbol, direction, order_result.get("error"))
+            logger.warning(
+                "ENTRY FAILED %s (%s): %s",
+                symbol, direction,
+                order_result.get("error") or order_result.get("status") or order_result,
+            )
             return
+
+        # Live: prefer actual fill price; recalc SL/TP so risk% stays honest
+        if not self.config.get("dry_run", True):
+            fill = self._extract_fill_price(order_result, entry_price)
+            if fill != entry_price:
+                logger.info(
+                    "Fill price %.6f differs from signal %.6f for %s — adjusting SL/TP",
+                    fill, entry_price, symbol,
+                )
+                entry_price = fill
+                if direction == "long":
+                    sl_price = _smart_round(entry_price * (1 - self.config["stop_loss_pct"] / 100))
+                    tp_price = _smart_round(entry_price * (1 + self.config["target_pct"] / 100))
+                else:
+                    sl_price = _smart_round(entry_price * (1 + self.config["stop_loss_pct"] / 100))
+                    tp_price = _smart_round(entry_price * (1 - self.config["target_pct"] / 100))
 
         with self.lock:
             self.open_trades[symbol] = {
                 "direction": direction,
                 "side": side,
                 "product_id": product_id,
+                "contract_value": contract_value,
                 "entry_price": entry_price,
                 "qty": qty,
                 "sl_price": sl_price,
                 "tp_price": tp_price,
                 "entry_time": datetime.now(timezone.utc).isoformat(),
+                "entry_ts": time.time(),
                 "score": sig["score"],
                 "order_result": order_result,
+                "recovered": False,
             }
             self.trades_today += 1
             self.failed_symbols.pop(symbol, None)
 
         self._log_trade("ENTRY", symbol, entry_price, qty, sig, order_result)
-        logger.info("ENTRY %s [%s] qty=%s score=%.3f sl=%s tp=%s",
-                    symbol, direction, qty, sig["score"], sl_price, tp_price)
+        logger.info(
+            "ENTRY %s [%s] qty=%s cv=%s score=%.3f sl=%s tp=%s",
+            symbol, direction, qty, contract_value, sig["score"], sl_price, tp_price,
+        )
 
     def _place_bracket_entry(self, product_id, qty, side, sl_price, tp_price):
-        """Ek hi order call -- entry + SL + target dono attach, taaki
-        exchange khud exit manage kare (humein tick-by-tick dekhne ki
-        zaroorat nahi). `side` "buy" (long) ya "sell" (short) hota hai;
-        bracket stop-loss/take-profit price direction ke hisaab se
-        pehle hi _enter_trade me invert ho chuki hoti hai."""
         if self.config.get("dry_run", True):
             return {
-                "dry_run": True, "product_id": product_id, "size": qty, "side": side,
+                "dry_run": True,
+                "product_id": product_id,
+                "size": qty,
+                "side": side,
                 "bracket_stop_loss_price": str(sl_price),
                 "bracket_take_profit_price": str(tp_price),
             }
@@ -672,58 +815,161 @@ class StrategyManager:
             logger.error("Bracket entry failed: %s", e, exc_info=True)
             return {"error": str(e)}
 
-    # -- monitoring / exit detection ----------------------------------------
+    # -- monitoring / exit ---------------------------------------------
     def _monitor_loop(self):
-        """Exchange khud SL/TP execute karta hai; humein sirf dekhna hai
-        ki position band hui ya nahi, taaki slot free ho sake."""
-        while True:
+        while self.running:
             try:
                 with self.lock:
                     symbols = list(self.open_trades.keys())
                 for symbol in symbols:
-                    self._check_position_closed(symbol)
+                    if self.config.get("dry_run", True):
+                        self._check_dry_run_exit(symbol)
+                    else:
+                        self._check_position_closed(symbol)
             except Exception:
                 logger.error("Monitor loop error", exc_info=True)
             time.sleep(self.config["monitor_interval_sec"])
 
-    def _check_position_closed(self, symbol):
-        trade = self.open_trades.get(symbol)
-        if not trade:
+    def _pnl_for_trade(self, trade, exit_price):
+        cv = float(trade.get("contract_value", 1.0) or 1.0)
+        qty = trade["qty"]
+        entry = trade["entry_price"]
+        if trade.get("direction") == "short":
+            return (entry - exit_price) * qty * cv
+        return (exit_price - entry) * qty * cv
+
+    def _close_trade(self, symbol, trade, exit_price, note):
+        pnl = self._pnl_for_trade(trade, exit_price)
+        with self.lock:
+            self.realized_pnl_today += pnl
+            self.open_trades.pop(symbol, None)
+        self._log_trade(
+            "EXIT", symbol, exit_price, trade["qty"],
+            {"direction": trade.get("direction"), "score": trade.get("score")},
+            {"note": note},
+            pnl=pnl,
+        )
+        logger.info(
+            "EXIT %s [%s] %s pnl=%.4f",
+            symbol, trade.get("direction"), note, pnl,
+        )
+
+    def _check_dry_run_exit(self, symbol):
+        """Simulate SL/TP (and max-hold) using latest feed price so dry-run
+        slots free up and PnL accounting can be validated end-to-end.
+
+        Copy-under-lock to avoid races with the scan/entry thread.
+        """
+        with self.lock:
+            trade = self.open_trades.get(symbol)
+            if not trade:
+                return
+            trade = dict(trade)  # shallow copy
+
+        candles = self.feed.get_candles(symbol, limit=5)
+        if not candles:
             return
-        if self.config.get("dry_run", True):
-            return  # dry-run me exchange par position hoti hi nahi
+        price = candles[-1]["close"]
+        direction = trade.get("direction", "long")
+        sl, tp = trade.get("sl_price"), trade.get("tp_price")
+
+        hit = None
+        if sl is not None and tp is not None:
+            if direction == "long":
+                if price <= sl:
+                    hit = ("SL", sl)
+                elif price >= tp:
+                    hit = ("TP", tp)
+            else:
+                if price >= sl:
+                    hit = ("SL", sl)
+                elif price <= tp:
+                    hit = ("TP", tp)
+
+        if hit is None:
+            max_hold = self.config.get("dry_run_max_hold_sec", 3600)
+            entry_ts = trade.get("entry_ts") or 0
+            if max_hold and entry_ts and (time.time() - entry_ts) >= max_hold:
+                hit = ("MAX_HOLD", price)
+
+        if hit:
+            self._close_trade(symbol, trade, hit[1], f"dry_run {hit[0]}")
+
+    def _check_position_closed(self, symbol):
+        with self.lock:
+            trade = self.open_trades.get(symbol)
+            if not trade:
+                return
+            trade = dict(trade)  # shallow copy
 
         try:
             position = self.client.get_position(trade["product_id"])
             pos_result = position.get("result", position) if isinstance(position, dict) else position
             size = pos_result.get("size", 0) if isinstance(pos_result, dict) else 0
+            try:
+                size = float(size) if size is not None else 0.0
+            except (TypeError, ValueError):
+                size = 0.0
+
+            mark = None
+            if isinstance(pos_result, dict):
+                for key in ("mark_price", "close", "last"):
+                    if pos_result.get(key) is not None:
+                        try:
+                            mark = float(pos_result[key])
+                            break
+                        except (TypeError, ValueError):
+                            pass
         except Exception as e:
             logger.warning("Could not fetch position for %s: %s", symbol, e)
             return
 
-        if size == 0:
-            # NOTE: exact exit price /v2/fills se lena zyada accurate hoga;
-            # yahan rough estimate use kiya hai simplicity ke liye.
-            exit_price = trade.get("tp_price") or trade.get("sl_price") or trade["entry_price"]
-            direction = trade.get("direction", "long")
-            if direction == "long":
-                pnl = (exit_price - trade["entry_price"]) * trade["qty"]
-            else:  # short -- price girne par profit
-                pnl = (trade["entry_price"] - exit_price) * trade["qty"]
-            with self.lock:
-                self.realized_pnl_today += pnl
-                self.open_trades.pop(symbol, None)
-            self._log_trade("EXIT", symbol, exit_price, trade["qty"], {}, {"note": "bracket closed"}, pnl=pnl)
-            logger.info("EXIT %s [%s] (bracket closed) pnl~=%.2f", symbol, direction, pnl)
+        if size != 0:
+            return
 
-    # -- logging / status -----------------------------------------------------
+        # Position flat -- infer exit using mark or last candle, then
+        # decide nearer to SL vs TP when brackets are known.
+        exit_price = mark
+        if exit_price is None:
+            candles = self.feed.get_candles(symbol, limit=3)
+            if candles:
+                exit_price = candles[-1]["close"]
+        if exit_price is None:
+            exit_price = (
+                trade.get("tp_price")
+                or trade.get("sl_price")
+                or trade["entry_price"]
+            )
+        else:
+            direction = trade.get("direction", "long")
+            sl, tp = trade.get("sl_price"), trade.get("tp_price")
+            if sl is not None and tp is not None:
+                if direction == "long":
+                    if exit_price <= sl:
+                        exit_price = sl
+                    elif exit_price >= tp:
+                        exit_price = tp
+                else:
+                    if exit_price >= sl:
+                        exit_price = sl
+                    elif exit_price <= tp:
+                        exit_price = tp
+
+        note = "recovered position closed" if trade.get("recovered") else "bracket closed"
+        self._close_trade(symbol, trade, exit_price, note)
+
+    # -- logging / status ----------------------------------------------
     def _log_trade(self, action, symbol, price, qty, sig, order_result, pnl=None):
         entry = {
             "time": datetime.now(timezone.utc).isoformat(),
-            "action": action, "symbol": symbol, "price": price, "qty": qty,
+            "action": action,
+            "symbol": symbol,
+            "price": price,
+            "qty": qty,
             "direction": sig.get("direction") if sig else None,
             "score": sig.get("score") if sig else None,
-            "pnl": pnl, "order_result": order_result,
+            "pnl": pnl,
+            "order_result": order_result,
             "dry_run": self.config.get("dry_run", True),
         }
         self.trade_log.append(entry)
@@ -740,26 +986,30 @@ class StrategyManager:
             logger.warning("Failed to persist trade log", exc_info=True)
 
     def status(self, symbol=None):
-        # symbol param backward-compat ke liye rakha hai, ignore hota hai
         with self.lock:
             open_trades = dict(self.open_trades)
             failed_symbols = dict(self.failed_symbols)
+            scan_grid = list(self.last_scan.values())
+            trades_today = self.trades_today
+            realized = self.realized_pnl_today
+            running = self.running
 
-        scan_grid = list(self.last_scan.values())
-        # Qualifying symbols pehle (score se sorted), fir baaki symbols
-        scan_grid.sort(key=lambda s: (not s.get("qualifies", False), -(s.get("score") or 0)))
+        scan_grid.sort(
+            key=lambda s: (not s.get("qualifies", False), -(s.get("score") or 0))
+        )
 
         return {
-            "running": self.running,
+            "running": running,
             "config": self.config,
-            "trades_today": self.trades_today,
+            "trades_today": trades_today,
             "max_trades_per_day": self.config["max_trades_per_day"],
             "open_trades": open_trades,
             "max_concurrent_trades": self.config["max_concurrent_trades"],
-            "realized_pnl_today": round(self.realized_pnl_today, 2),
+            "realized_pnl_today": round(realized, 4),
             "failed_symbols_cooldown": failed_symbols,
             "candidates": sorted(
-                [s for s in scan_grid if s.get("qualifies")], key=lambda s: -s["score"]
+                [s for s in scan_grid if s.get("qualifies")],
+                key=lambda s: -s["score"],
             )[:10],
             "scan_grid": scan_grid,
             "total_symbols": len(self.symbols),
