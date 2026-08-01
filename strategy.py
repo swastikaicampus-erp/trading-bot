@@ -1,54 +1,34 @@
 """
 strategy.py — global multi-symbol scanning engine for the Delta Exchange bot.
 
-Ek hi global "brain" hai jo watchlist ke saare symbols (ab: SAARE live
-perpetual futures) continuously scan karta hai, DONO directions mein:
+Ek hi global "brain" hai jo watchlist ke saare symbols continuously scan
+karta hai, DONO directions mein:
 
-    LONG (buy) setup:
-        1. ADX(14) >= adx_threshold -> trending, not choppy
-        2. ADX rising (vs previous bar) -> trend strengthening (optional gate)
-        3. EMA(fast) crosses ABOVE EMA(slow) on the latest CLOSED relationship
-        4. RSI(14) between rsi_floor and rsi_overbought -> bullish momentum
-        5. Price > VWAP (session VWAP, UTC-day)
-        6. Candle volume > volume_multiplier x rolling average volume
-
-    SHORT (sell) setup -- bilkul mirror image:
+    LONG:
         1. ADX(14) >= adx_threshold
-        2. ADX rising
-        3. EMA(fast) crosses BELOW EMA(slow)
-        4. RSI between rsi_short_floor and rsi_short_ceiling
-        5. Price < VWAP
-        6. Volume surge
+        2. ADX rising (optional)
+        3. EMA(fast) crosses ABOVE EMA(slow)
+        4. RSI between rsi_floor and rsi_overbought
+        5. Price > VWAP (UTC-day session)
+        6. Volume > volume_multiplier x rolling avg
+        7. min EMA separation filter
 
-Jitne bhi symbols in saari conditions ko (kisi bhi ek direction mein)
-pass karte hain unme se SABSE ZYADA SCORE wale symbol me hi trade li
-jaati hai -- baaki qualifying symbols sirf "candidates" list me dikhte
-hain.
+    SHORT: mirror image
 
-HAR symbol ka diagnostic snapshot `last_scan` me store hota hai --
-frontend scan grid ke liye.
+Sabse zyada SCORE wale qualifying symbol pe trade.
+max_trades_per_day GLOBAL, max_concurrent_trades hard cap.
+Bracket SL+TP entry ke saath.
 
-Rules:
-  - max_trades_per_day GLOBAL (sab symbols + dono directions)
-  - max_concurrent_trades hard cap (default 2)
-  - Bracket SL+TP entry ke saath; monitor sirf position close detect karta hai
-  - dry_run me simulated SL/TP exit (slots free hote rehte hain)
-
-BUGFIXES / IMPROVEMENTS (is version):
-  - contract_value open_trades me store + exit PnL me multiply
-  - Exit price: live mark/last se SL vs TP infer (tp or sl blind pick nahi)
-  - dry_run simulated exit on candle price vs SL/TP
-  - monitor loop self.running respect karta hai
-  - failed_symbols prune after cooldown
-  - qty floor pe warning log jab risk_pct exceed ho
-  - last_scan writes lock-protected
-  - score: direction=None pe neutral RSI mid (50)
-  - optional require_adx_rising filter (default True)
-  - min_ema_separation_pct: micro-cross noise filter
-  - CRITICAL: startup pe exchange positions recover (_sync_open_positions)
-  - CRITICAL: open_trades saari access copy-under-lock (race-safe)
-  - CRITICAL: live entry pe fill price extract + SL/TP actual entry se recalc
-  - basic order status reject check
+IMPROVEMENTS (this version):
+  - Realistic RR defaults: SL 0.8% / TP 2.0%
+  - Round-trip fee deducted from realized PnL
+  - Stricter ADX / volume / EMA-sep defaults
+  - Score penalises already-extended moves slightly
+  - contract_value-aware sizing + PnL
+  - Fill-price SL/TP recalc on live entry
+  - Race-safe open_trades copies
+  - Startup position recovery
+  - dry_run simulated SL/TP + max-hold
 
 SAFETY
   - dry_run True by default
@@ -74,26 +54,26 @@ DEFAULT_CONFIG = {
     "fast_ema": 9,
     "slow_ema": 21,
 
-    # momentum filter -- LONG side
+    # momentum filter -- LONG
     "rsi_period": 14,
     "rsi_floor": 40,
-    "rsi_overbought": 75,
+    "rsi_overbought": 72,
 
-    # momentum filter -- SHORT side
-    "rsi_short_floor": 25,
+    # momentum filter -- SHORT
+    "rsi_short_floor": 28,
     "rsi_short_ceiling": 60,
 
     # trend filter
     "adx_period": 14,
-    "adx_threshold": 22,          # slightly stricter than 20 (less chop)
-    "require_adx_rising": True,   # ADX must be >= previous bar
+    "adx_threshold": 25,
+    "require_adx_rising": True,
 
-    # avoid microscopic EMA crosses (price % separation after cross)
-    "min_ema_separation_pct": 0.05,  # 0.05% of price; 0 = disabled
+    # avoid microscopic EMA crosses
+    "min_ema_separation_pct": 0.12,
 
     # volume filter
     "volume_lookback": 20,
-    "volume_multiplier": 1.5,     # slightly stricter than 1.2
+    "volume_multiplier": 1.8,
 
     # vwap filter
     "vwap_filter": True,
@@ -101,16 +81,19 @@ DEFAULT_CONFIG = {
     # position sizing -- risk-based
     "capital": 50000,
     "risk_pct": 1.0,
-    "stop_loss_pct": 0.5,
-    "target_pct": 1.0,
+    "stop_loss_pct": 0.8,
+    "target_pct": 2.0,
     "max_leverage": 3,
+
+    # fees (Delta India taker ~0.05% each side → ~0.10% round trip)
+    "fee_rate_round_trip": 0.0010,
 
     # direction control
     "allow_long": True,
     "allow_short": True,
 
     # portfolio-level limits
-    "max_trades_per_day": 4,
+    "max_trades_per_day": 3,
     "max_concurrent_trades": 2,
     "max_daily_loss": 1000,
 
@@ -118,7 +101,6 @@ DEFAULT_CONFIG = {
     "monitor_interval_sec": 10,
     "failed_retry_cooldown_sec": 300,
 
-    # dry-run: max hold time (sec) before force-close simulation if SL/TP not hit
     "dry_run_max_hold_sec": 3600,
 
     "dry_run": True,
@@ -130,7 +112,8 @@ EDITABLE_CONFIG_KEYS = [
     "adx_period", "adx_threshold", "require_adx_rising", "min_ema_separation_pct",
     "volume_lookback", "volume_multiplier",
     "vwap_filter", "capital", "risk_pct", "stop_loss_pct", "target_pct",
-    "max_leverage", "allow_long", "allow_short",
+    "max_leverage", "fee_rate_round_trip",
+    "allow_long", "allow_short",
     "max_trades_per_day", "max_concurrent_trades",
     "max_daily_loss", "scan_interval_sec", "monitor_interval_sec",
     "failed_retry_cooldown_sec", "dry_run_max_hold_sec",
@@ -351,7 +334,6 @@ def compute_diagnostics(symbol, candles, config):
     )
     adx_rising_ok = (not config.get("require_adx_rising", True)) or adx_rising
 
-    # micro-cross filter: fast/slow separation as % of price
     min_sep = float(config.get("min_ema_separation_pct", 0) or 0)
     if min_sep > 0 and curr_price:
         sep_pct = abs(curr_fast - curr_slow) / curr_price * 100.0
@@ -407,10 +389,18 @@ def compute_diagnostics(symbol, candles, config):
             rsi_mid = (config["rsi_floor"] + config["rsi_overbought"]) / 2
             rsi_span = max(rsi_mid - config["rsi_floor"], 1)
         else:
-            # neutral for non-qualifying grid rows
             rsi_mid, rsi_span = 50.0, 50.0
         rsi_score = 1.0 - min(abs(curr_rsi - rsi_mid) / rsi_span, 1.0)
-        score = round(adx_score * 0.45 + vol_score * 0.30 + rsi_score * 0.25, 4)
+
+        # mild penalty if RSI already very extended (late entry risk)
+        extension_pen = 0.0
+        if direction == "long" and curr_rsi is not None and curr_rsi > 65:
+            extension_pen = min((curr_rsi - 65) / 35.0, 0.25)
+        elif direction == "short" and curr_rsi is not None and curr_rsi < 35:
+            extension_pen = min((35 - curr_rsi) / 35.0, 0.25)
+
+        raw = adx_score * 0.45 + vol_score * 0.30 + rsi_score * 0.25
+        score = round(max(raw - extension_pen, 0.0), 4)
 
     return {
         "symbol": symbol,
@@ -472,8 +462,6 @@ class StrategyManager:
                 return
             self.running = True
 
-        # Recover any positions already open on the exchange before
-        # scan/monitor threads start (critical for live restarts).
         self._sync_open_positions()
 
         self.scan_thread = threading.Thread(target=self._scan_loop, daemon=True)
@@ -517,14 +505,8 @@ class StrategyManager:
                 s: t for s, t in self.failed_symbols.items() if now - t < cooldown
             }
 
-    # -- position recovery (CRITICAL) ---------------------------------
+    # -- position recovery ---------------------------------------------
     def _sync_open_positions(self):
-        """Best-effort recovery of positions that already exist on the exchange.
-
-        Uses per-product get_position. Recovered trades have sl_price/tp_price=None
-        (brackets unknown); monitor only waits for size==0 and uses mark/last for PnL.
-        Does NOT increment trades_today.
-        """
         recovered = 0
         for symbol, info in list(self.product_info.items()):
             pid = info.get("product_id")
@@ -562,7 +544,7 @@ class StrategyManager:
                         entry_price = candles[-1]["close"]
                 if entry_price is None:
                     logger.warning(
-                        "Recovered position for %s but no entry price available — skipping track",
+                        "Recovered position for %s but no entry price — skipping track",
                         symbol,
                     )
                     continue
@@ -589,7 +571,8 @@ class StrategyManager:
                     }
                 recovered += 1
                 logger.info(
-                    "RECOVERED open position %s [%s] qty=%s entry≈%s",
+                    "RECOVERED open position %s [%s] qty=%s entry≈%s "
+                    "(no bracket — monitor waits for flat)",
                     symbol, direction, qty, entry_price,
                 )
             except Exception as e:
@@ -636,7 +619,9 @@ class StrategyManager:
         now = time.time()
         with self.lock:
             open_symbols = set(self.open_trades.keys())
-            cooling_down = {s for s, t in self.failed_symbols.items() if now - t < cooldown_sec}
+            cooling_down = {
+                s for s, t in self.failed_symbols.items() if now - t < cooldown_sec
+            }
             scan_snapshot = dict(self.last_scan)
 
         candidates = [
@@ -653,7 +638,6 @@ class StrategyManager:
 
     # -- entry ---------------------------------------------------------
     def _extract_fill_price(self, order_result, fallback):
-        """Best-effort average fill price from exchange order response."""
         if not isinstance(order_result, dict):
             return fallback
 
@@ -707,7 +691,6 @@ class StrategyManager:
         loss_per_contract = sl_move * contract_value
         qty = max(int(risk_amount // loss_per_contract), 1) if loss_per_contract > 0 else 1
 
-        # warn if floor forces more risk than risk_pct
         if loss_per_contract > 0 and qty * loss_per_contract > risk_amount * 1.05:
             logger.warning(
                 "qty floor=1 exceeds risk_pct for %s: risk≈%.2f vs budget %.2f",
@@ -743,7 +726,6 @@ class StrategyManager:
             )
             return
 
-        # Live: prefer actual fill price; recalc SL/TP so risk% stays honest
         if not self.config.get("dry_run", True):
             fill = self._extract_fill_price(order_result, entry_price)
             if fill != entry_price:
@@ -753,11 +735,19 @@ class StrategyManager:
                 )
                 entry_price = fill
                 if direction == "long":
-                    sl_price = _smart_round(entry_price * (1 - self.config["stop_loss_pct"] / 100))
-                    tp_price = _smart_round(entry_price * (1 + self.config["target_pct"] / 100))
+                    sl_price = _smart_round(
+                        entry_price * (1 - self.config["stop_loss_pct"] / 100)
+                    )
+                    tp_price = _smart_round(
+                        entry_price * (1 + self.config["target_pct"] / 100)
+                    )
                 else:
-                    sl_price = _smart_round(entry_price * (1 + self.config["stop_loss_pct"] / 100))
-                    tp_price = _smart_round(entry_price * (1 - self.config["target_pct"] / 100))
+                    sl_price = _smart_round(
+                        entry_price * (1 + self.config["stop_loss_pct"] / 100)
+                    )
+                    tp_price = _smart_round(
+                        entry_price * (1 - self.config["target_pct"] / 100)
+                    )
 
         with self.lock:
             self.open_trades[symbol] = {
@@ -796,7 +786,7 @@ class StrategyManager:
             }
 
         if self.place_order_fn is None:
-            err = "place_order_fn not configured on StrategyManager -- pass it in from app.py"
+            err = "place_order_fn not configured on StrategyManager"
             logger.error(err)
             return {"error": err}
 
@@ -831,12 +821,19 @@ class StrategyManager:
             time.sleep(self.config["monitor_interval_sec"])
 
     def _pnl_for_trade(self, trade, exit_price):
+        """Gross price PnL minus estimated round-trip fees."""
         cv = float(trade.get("contract_value", 1.0) or 1.0)
         qty = trade["qty"]
         entry = trade["entry_price"]
         if trade.get("direction") == "short":
-            return (entry - exit_price) * qty * cv
-        return (exit_price - entry) * qty * cv
+            gross = (entry - exit_price) * qty * cv
+        else:
+            gross = (exit_price - entry) * qty * cv
+
+        fee_rate = float(self.config.get("fee_rate_round_trip", 0.001) or 0.0)
+        notional = entry * qty * cv
+        fees = notional * fee_rate
+        return gross - fees
 
     def _close_trade(self, symbol, trade, exit_price, note):
         pnl = self._pnl_for_trade(trade, exit_price)
@@ -855,16 +852,11 @@ class StrategyManager:
         )
 
     def _check_dry_run_exit(self, symbol):
-        """Simulate SL/TP (and max-hold) using latest feed price so dry-run
-        slots free up and PnL accounting can be validated end-to-end.
-
-        Copy-under-lock to avoid races with the scan/entry thread.
-        """
         with self.lock:
             trade = self.open_trades.get(symbol)
             if not trade:
                 return
-            trade = dict(trade)  # shallow copy
+            trade = dict(trade)
 
         candles = self.feed.get_candles(symbol, limit=5)
         if not candles:
@@ -900,11 +892,14 @@ class StrategyManager:
             trade = self.open_trades.get(symbol)
             if not trade:
                 return
-            trade = dict(trade)  # shallow copy
+            trade = dict(trade)
 
         try:
             position = self.client.get_position(trade["product_id"])
-            pos_result = position.get("result", position) if isinstance(position, dict) else position
+            pos_result = (
+                position.get("result", position)
+                if isinstance(position, dict) else position
+            )
             size = pos_result.get("size", 0) if isinstance(pos_result, dict) else 0
             try:
                 size = float(size) if size is not None else 0.0
@@ -927,8 +922,6 @@ class StrategyManager:
         if size != 0:
             return
 
-        # Position flat -- infer exit using mark or last candle, then
-        # decide nearer to SL vs TP when brackets are known.
         exit_price = mark
         if exit_price is None:
             candles = self.feed.get_candles(symbol, limit=3)
@@ -955,7 +948,11 @@ class StrategyManager:
                     elif exit_price <= tp:
                         exit_price = tp
 
-        note = "recovered position closed" if trade.get("recovered") else "bracket closed"
+        note = (
+            "recovered position closed"
+            if trade.get("recovered")
+            else "bracket closed"
+        )
         self._close_trade(symbol, trade, exit_price, note)
 
     # -- logging / status ----------------------------------------------

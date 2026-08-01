@@ -10,6 +10,16 @@ backup
 
 5CXLIIPYNH6OIVPN
 
+vps
+
+
+ssh root@187.127.130.77
+cd /var/www/delta-service
+git pull origin main
+pm2 restart delta-service
+pm2 status
+
+
 
 API Key
 MnxBidMh6euXNiVm6uNH8KlCSSLXkh

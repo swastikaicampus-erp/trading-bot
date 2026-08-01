@@ -94,31 +94,6 @@ feed = MarketDataFeed(WATCHLIST)
 feed.start()
 
 
-# pehle function
-def _place_order_for_strategy(order_body):
-    ok, status, data = _signed_request("POST", "/v2/orders", body=order_body)
-    if ok:
-        return data.get("result", data)
-    return {"error": _friendly_error(data).get("message") or str(data)}
-
-
-# phir StrategyManager
-strategy = StrategyManager(
-    feed=feed,
-    client=client,
-    watchlist=WATCHLIST,
-    config={
-        "dry_run": DRY_RUN
-    },
-    place_order_fn=_place_order_for_strategy,
-)
-
-# ---- all-products cache (full Delta symbol universe) ----
-_products_cache = {"data": [], "fetched_at": 0}
-_products_lock = threading.Lock()
-PRODUCTS_CACHE_TTL = 300  # seconds
-
-
 # =======================================================================
 # Delta signing helper -- used for every endpoint that isn't already
 # well covered by delta_rest_client (orders, bracket orders, batch
@@ -225,6 +200,72 @@ def _delta_json_response(ok, status_code, data):
     return jsonify({"success": False, "error": _friendly_error(data)}), status_code if status_code >= 400 else 400
 
 
+def _place_order_for_strategy(order_body):
+    """Strategy entry path: soft-set leverage then place bracket market order."""
+    product_id = order_body.get("product_id")
+    if product_id and not DRY_RUN:
+        try:
+            lev = strategy.config.get("max_leverage", 3)
+            _signed_request(
+                "POST",
+                f"/v2/products/{product_id}/orders/leverage",
+                body={"leverage": lev},
+            )
+        except Exception:
+            pass
+
+    ok, status, data = _signed_request("POST", "/v2/orders", body=order_body)
+    if ok:
+        return data.get("result", data)
+    return {"error": _friendly_error(data).get("message") or str(data)}
+
+
+# phir StrategyManager
+strategy = StrategyManager(
+    feed=feed,
+    client=client,
+    watchlist=WATCHLIST,
+    config={
+        "dry_run": DRY_RUN
+    },
+    place_order_fn=_place_order_for_strategy,
+)
+
+
+def _sync_capital_from_balance():
+    """Best-effort: wallet available balance → strategy capital (risk sizing)."""
+    try:
+        bal = client.get_balances(asset_id=3)  # 3 = USD asset_id on Delta
+        rows = bal.get("result", bal) if isinstance(bal, dict) else bal
+        if isinstance(rows, list) and rows:
+            row = rows[0] if isinstance(rows[0], dict) else {}
+        elif isinstance(rows, dict):
+            row = rows
+        else:
+            return
+        for key in ("available_balance", "available", "balance", "equity"):
+            val = row.get(key)
+            if val is not None:
+                try:
+                    capital = float(val)
+                    if capital > 0:
+                        strategy.config["capital"] = capital
+                        print(f"[startup] strategy capital set from balance: {capital}")
+                        return
+                except (TypeError, ValueError):
+                    pass
+    except Exception as e:
+        print(f"[startup] could not sync capital from balance: {e}")
+
+
+_sync_capital_from_balance()
+
+# ---- all-products cache (full Delta symbol universe) ----
+_products_cache = {"data": [], "fetched_at": 0}
+_products_lock = threading.Lock()
+PRODUCTS_CACHE_TTL = 300  # seconds
+
+
 def _check_clock_drift():
     """Compares local system time to Delta server time (via response
     Date header) so drift shows up in /health before it causes an
@@ -287,6 +328,7 @@ def health():
         "status": "ok",
         "dry_run": DRY_RUN,
         "watchlist": feed.get_symbols(),
+        "capital": strategy.config.get("capital"),
         "clock": _check_clock_drift(),
     })
 
@@ -355,6 +397,10 @@ def close_position():
         position = client.get_position(product_id)
         pos_result = position.get("result", position) if isinstance(position, dict) else position
         size = pos_result.get("size", 0) if isinstance(pos_result, dict) else 0
+        try:
+            size = float(size) if size is not None else 0.0
+        except (TypeError, ValueError):
+            size = 0.0
     except Exception as e:
         return jsonify({"success": False, "error": f"Could not fetch position: {e}"}), 500
 
@@ -364,7 +410,7 @@ def close_position():
     side = "sell" if size > 0 else "buy"
     order_body = {
         "product_id": product_id,
-        "size": abs(size),
+        "size": max(abs(int(size)), 1),
         "side": side,
         "order_type": "market_order",
         "reduce_only": True,
