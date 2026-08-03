@@ -565,6 +565,19 @@ class StrategyManager:
         self.config.update(clean_patch)
         return self.config
 
+
+
+def status(self):
+    with self.lock:
+        return {
+            "running": self.running,
+            "symbols": self.symbols,
+            "watchlist_count": len(self.symbols),
+            "open_trades": len(self.open_trades),
+            "trades_today": self.trades_today,
+            "realized_pnl_today": self.realized_pnl_today,
+            "config": self.config,
+        }
     def _roll_day_if_needed(self):
         today = datetime.now(timezone.utc).date()
         if today != self.day_marker:
