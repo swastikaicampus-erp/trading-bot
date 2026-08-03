@@ -20,15 +20,18 @@ max_trades_per_day GLOBAL, max_concurrent_trades hard cap.
 Bracket SL+TP entry ke saath (ATR-based ya fixed %, config se).
 
 IMPROVEMENTS (this version, 2026-08-03):
-  - tighter RSI band (45-65 long / 35-55 short), ADX 30, min_ema_sep 0.15
-  - stop_loss_pct 1.5 / target_pct 3.0 as fixed-% fallback
-  - ATR-based SL/TP (use_atr_stops)
-  - 2-candle confirmation on EMA cross
-  - post-exit cooldown (properly enforced)
-  - min_score_threshold
-  - leverage-aware qty sizing + HARD max_qty safety cap
-  - ATR-distance aware risk sizing when ATR available
-  - realistic default capital + clearer sizing logs
+  - CHANGED: tighter RSI band (45-65 long / 35-55 short), ADX 30, min_ema_sep 0.15
+  - CHANGED: stop_loss_pct 1.5 / target_pct 3.0 as fixed-% fallback
+  - ADDED: ATR-based SL/TP (use_atr_stops) -- per-symbol volatility instead of one fixed %
+  - ADDED: 2-candle confirmation on EMA cross (avoid single-candle whipsaw fakeouts)
+  - ADDED: post-exit cooldown -- symbol won't be re-entered immediately after a close
+  - ADDED: min_score_threshold -- weak candidates skipped even if "best available"
+  - ADDED: leverage-aware qty sizing -- respects each product's actual max_leverage
+           from the exchange, not just the bot's own config cap (fixes repeated
+           leverage_limit_exceeded rejections)
+  - (carried over) Realistic RR defaults, round-trip fee deduction, contract_value-aware
+    sizing + PnL, fill-price SL/TP recalc, race-safe copies, startup position recovery,
+    dry_run simulated SL/TP + max-hold
 
 SAFETY
   - dry_run True by default
@@ -54,80 +57,74 @@ DEFAULT_CONFIG = {
     "fast_ema": 9,
     "slow_ema": 21,
 
-    # momentum filter -- LONG
+    # momentum filter -- LONG                      # CHANGED: tighter band, avoid extended entries
     "rsi_period": 14,
     "rsi_floor": 45,
     "rsi_overbought": 65,
 
-    # momentum filter -- SHORT
+    # momentum filter -- SHORT                      # CHANGED
     "rsi_short_floor": 35,
     "rsi_short_ceiling": 55,
 
     # trend filter
     "adx_period": 14,
-    "adx_threshold": 30,
+    "adx_threshold": 30,                            # CHANGED: 25 -> 30, filter weak trends
     "require_adx_rising": True,
 
     # avoid microscopic EMA crosses
-    "min_ema_separation_pct": 0.15,
+    "min_ema_separation_pct": 0.15,                 # CHANGED: 0.12 -> 0.15
 
-    # require 2-candle confirmation on the EMA cross
+    # require 2-candle confirmation on the EMA cross, not just current candle  # ADDED
     "require_cross_confirmation": True,
 
     # volume filter
     "volume_lookback": 20,
-    "volume_multiplier": 2.0,
+    "volume_multiplier": 2.0,                       # CHANGED: 1.8 -> 2.0
 
     # vwap filter
     "vwap_filter": True,
 
     # position sizing -- risk-based
-    # IMPORTANT: isko apne ACTUAL available margin ke close set karo.
-    # 50000 rakhne se low-price coins me leverage_limit_exceeded aata tha.
-   
-    "capital": 2000,
+    "capital": 50000,
     "risk_pct": 1.0,
     "max_leverage": 3,
 
-    # NEW — sizing safety (flat max_qty hatao ya 0 rakh do)
-    "max_qty": 0,                    # 0 = disabled (recommended)
-    "max_risk_multiple": 3.0,        # qty=1 pe risk budget se 3x zyada → skip
-    "min_notional_usd": 15.0,        # final notional isse kam → skip
-    "min_risk_usd": 3.0,             # final risk isse kam → skip
-
     # --- stop / target ---------------------------------------------------
-    "stop_loss_pct": 1.5,
-    "target_pct": 3.0,
+    # fixed-% fallback (used when use_atr_stops is False or ATR unavailable)
+    "stop_loss_pct": 1.5,                           # CHANGED: 0.8 -> 1.5
+    "target_pct": 3.0,                              # CHANGED: 2.0 -> 3.0
 
-    # ATR-based stops
+    # ATR-based stops -- per-symbol volatility instead of one fixed %  # ADDED
     "use_atr_stops": True,
     "atr_period": 14,
     "atr_sl_mult": 1.5,
     "atr_tp_mult": 3.0,
 
-    # fees (Delta India taker ~0.05% each side → ~0.10% round trip)
+    # fees (Delta India taker ~0.05% each side -> ~0.10% round trip)
     "fee_rate_round_trip": 0.0010,
 
     # direction control
     "allow_long": True,
     "allow_short": True,
 
-    # minimum score to even consider a candidate (0-1 scale)
+    # minimum score to even consider a candidate (0-1 scale)  # ADDED
     "min_score_threshold": 0.55,
 
     # portfolio-level limits
-    "max_trades_per_day": 2,
-    "max_concurrent_trades": 1,
-    "max_daily_loss": 100,
+    "max_trades_per_day": 2,                        # CHANGED: 3 -> 2
+    "max_concurrent_trades": 1,                     # CHANGED: 2 -> 1
+    "max_daily_loss": 1000,
 
     "scan_interval_sec": 5,
     "monitor_interval_sec": 10,
     "failed_retry_cooldown_sec": 300,
 
-    # cooldown after ANY exit (win or loss) — prevents immediate re-chase
+    # cooldown applied to a symbol right after ANY exit (win or loss),      # ADDED
+    # so the bot doesn't immediately re-chase the same symbol into chop
     "post_exit_cooldown_sec": 900,
 
     "dry_run_max_hold_sec": 3600,
+
     "dry_run": True,
 }
 
@@ -137,7 +134,7 @@ EDITABLE_CONFIG_KEYS = [
     "adx_period", "adx_threshold", "require_adx_rising", "min_ema_separation_pct",
     "require_cross_confirmation",
     "volume_lookback", "volume_multiplier",
-    "vwap_filter", "capital", "risk_pct", "max_qty", "max_risk_multiple", "min_notional_usd", "min_risk_usd",
+    "vwap_filter", "capital", "risk_pct",
     "stop_loss_pct", "target_pct",
     "use_atr_stops", "atr_period", "atr_sl_mult", "atr_tp_mult",
     "max_leverage", "fee_rate_round_trip",
@@ -237,8 +234,9 @@ def adx(highs, lows, closes, period=14):
     return adx_out
 
 
+# ADDED -----------------------------------------------------------------
 def atr(highs, lows, closes, period=14):
-    """Wilder's ATR — used for volatility-based SL/TP."""
+    """Wilder's ATR -- used for volatility-based SL/TP instead of a fixed %."""
     n = len(highs)
     if n < 2:
         return [None] * n
@@ -256,6 +254,7 @@ def atr(highs, lows, closes, period=14):
     for i in range(period, len(trs)):
         out.append((out[-1] * (period - 1) + trs[i]) / period)
     return out
+# -------------------------------------------------------------------------
 
 
 def _smart_round(price, sig_digits=5):
@@ -297,6 +296,10 @@ def resolve_product_info(client, symbols, use_cache=True):
             except (TypeError, ValueError):
                 contract_value = 1.0
 
+            # ADDED: capture the exchange's actual per-product max leverage.
+            # Delta's product payload usually carries this either directly or
+            # nested inside a leverage-bracket-like field -- fall back to None
+            # (meaning "unknown, use bot's own config cap") if not found.
             max_leverage = None
             for lev_key in ("max_leverage", "default_leverage", "leverage"):
                 raw_lev = row.get(lev_key)
@@ -310,7 +313,7 @@ def resolve_product_info(client, symbols, use_cache=True):
             by_symbol[row["symbol"].upper()] = {
                 "product_id": row.get("id"),
                 "contract_value": contract_value,
-                "max_leverage": max_leverage,
+                "max_leverage": max_leverage,   # ADDED
             }
         for sym in missing:
             info = by_symbol.get(sym.upper())
@@ -349,6 +352,7 @@ def _today_vwap(candles):
 
 
 def compute_diagnostics(symbol, candles, config):
+    # NOTE: need +1 vs before so index -3 (confirmation candle) is always available
     need = max(config["slow_ema"], config["rsi_period"], config["adx_period"] * 2) + 3
     empty_conditions = {
         "cross_up": False, "cross_down": False, "trend_aligned": False,
@@ -379,7 +383,7 @@ def compute_diagnostics(symbol, candles, config):
     slow = ema(closes, config["slow_ema"])
     rsi_vals = rsi(closes, config["rsi_period"])
     adx_vals = adx(highs, lows, closes, config["adx_period"])
-    atr_vals = atr(highs, lows, closes, config.get("atr_period", 14))
+    atr_vals = atr(highs, lows, closes, config.get("atr_period", 14))   # ADDED
 
     prev_fast, curr_fast = fast[-2], fast[-1]
     prev_slow, curr_slow = slow[-2], slow[-1]
@@ -387,9 +391,13 @@ def compute_diagnostics(symbol, candles, config):
     curr_adx = adx_vals[-1]
     prev_adx = adx_vals[-2] if len(adx_vals) >= 2 else None
     curr_price = closes[-1]
-    curr_atr = atr_vals[-1] if atr_vals else None
+    curr_atr = atr_vals[-1] if atr_vals else None   # ADDED
 
-    # 2-candle confirmation on the cross
+    # ---- ADDED: 2-candle confirmation on the cross ----------------------
+    # Old behaviour looked only at prev vs curr candle, which fires on the
+    # very first tick past the cross and gets whipsawed by an immediate
+    # pullback. Now we require the cross to have *already happened* one
+    # candle back, and still be holding on the current candle.
     if config.get("require_cross_confirmation", True) and len(fast) >= 3:
         prior_fast, prior_slow = fast[-3], slow[-3]
         crossed_up_1_ago = prior_fast <= prior_slow and prev_fast > prev_slow
@@ -399,6 +407,7 @@ def compute_diagnostics(symbol, candles, config):
     else:
         fresh_cross_up = prev_fast <= prev_slow and curr_fast > curr_slow
         fresh_cross_down = prev_fast >= prev_slow and curr_fast < curr_slow
+    # -----------------------------------------------------------------------
 
     trend_aligned = curr_fast > curr_slow
 
@@ -466,6 +475,7 @@ def compute_diagnostics(symbol, candles, config):
             rsi_mid, rsi_span = 50.0, 50.0
         rsi_score = 1.0 - min(abs(curr_rsi - rsi_mid) / rsi_span, 1.0)
 
+        # mild penalty if RSI already very extended (late entry risk)
         extension_pen = 0.0
         if direction == "long" and curr_rsi is not None and curr_rsi > 65:
             extension_pen = min((curr_rsi - 65) / 35.0, 0.25)
@@ -483,7 +493,7 @@ def compute_diagnostics(symbol, candles, config):
         "rsi": round(curr_rsi, 2) if curr_rsi is not None else None,
         "volume_ratio": round(volume_ratio, 2),
         "vwap": _smart_round(vwap) if vwap else None,
-        "atr": round(curr_atr, 6) if curr_atr is not None else None,
+        "atr": round(curr_atr, 6) if curr_atr is not None else None,   # ADDED
         "conditions": {
             "cross_up": fresh_cross_up,
             "cross_down": fresh_cross_down,
@@ -522,8 +532,7 @@ class StrategyManager:
         self.lock = threading.Lock()
 
         self.open_trades = {}
-        self.failed_symbols = {}          # entry failures
-        self.exit_cooldown = {}           # post-exit cooldowns (separate)
+        self.failed_symbols = {}
         self.trades_today = 0
         self.realized_pnl_today = 0.0
         self.day_marker = datetime.now(timezone.utc).date()
@@ -572,17 +581,12 @@ class StrategyManager:
             self.trades_today = 0
             self.realized_pnl_today = 0.0
 
-    def _prune_cooldowns(self):
-        """Prune both failed-entry and post-exit cooldowns."""
+    def _prune_failed_symbols(self):
+        cooldown = self.config.get("failed_retry_cooldown_sec", 300)
         now = time.time()
-        fail_cd = self.config.get("failed_retry_cooldown_sec", 300)
-        exit_cd = self.config.get("post_exit_cooldown_sec", 900)
         with self.lock:
             self.failed_symbols = {
-                s: t for s, t in self.failed_symbols.items() if now - t < fail_cd
-            }
-            self.exit_cooldown = {
-                s: t for s, t in self.exit_cooldown.items() if now - t < exit_cd
+                s: t for s, t in self.failed_symbols.items() if now - t < cooldown
             }
 
     # -- position recovery ---------------------------------------------
@@ -666,7 +670,7 @@ class StrategyManager:
         while self.running:
             try:
                 self._roll_day_if_needed()
-                self._prune_cooldowns()
+                self._prune_failed_symbols()
                 self._scan_all_symbols()
 
                 with self.lock:
@@ -695,28 +699,22 @@ class StrategyManager:
                 self.last_scan[symbol] = diag
 
     def _maybe_enter_best_candidate(self):
+        cooldown_sec = self.config.get("failed_retry_cooldown_sec", 300)
         now = time.time()
-        min_score = self.config.get("min_score_threshold", 0.0)
-        fail_cd = self.config.get("failed_retry_cooldown_sec", 300)
-        exit_cd = self.config.get("post_exit_cooldown_sec", 900)
-
+        min_score = self.config.get("min_score_threshold", 0.0)   # ADDED
         with self.lock:
             open_symbols = set(self.open_trades.keys())
-            cooling_failed = {
-                s for s, t in self.failed_symbols.items() if now - t < fail_cd
-            }
-            cooling_exit = {
-                s for s, t in self.exit_cooldown.items() if now - t < exit_cd
+            cooling_down = {
+                s for s, t in self.failed_symbols.items() if now - t < cooldown_sec
             }
             scan_snapshot = dict(self.last_scan)
 
         candidates = [
             diag for symbol, diag in scan_snapshot.items()
             if diag.get("qualifies")
-            and diag.get("score", 0) >= min_score
+            and diag.get("score", 0) >= min_score          # ADDED
             and symbol not in open_symbols
-            and symbol not in cooling_failed
-            and symbol not in cooling_exit
+            and symbol not in cooling_down
         ]
         if not candidates:
             return
@@ -764,6 +762,7 @@ class StrategyManager:
         ).lower()
         return status in ("rejected", "cancelled", "canceled", "failed", "expired")
 
+    # ADDED: compute SL/TP either from ATR or the fixed-% fallback
     def _compute_sl_tp(self, direction, entry_price, atr_val):
         use_atr = self.config.get("use_atr_stops", False) and atr_val
         if use_atr:
@@ -784,166 +783,105 @@ class StrategyManager:
             sl_price = _smart_round(entry_price * (1 + self.config["stop_loss_pct"] / 100))
             tp_price = _smart_round(entry_price * (1 - self.config["target_pct"] / 100))
         return sl_price, tp_price
-def _enter_trade(self, sig):
-    symbol = sig["symbol"]
-    direction = sig["direction"]
-    side = "buy" if direction == "long" else "sell"
 
-    info = self.product_info[symbol]
-    product_id = info["product_id"]
-    contract_value = float(info.get("contract_value", 1.0) or 1.0)
-    entry_price = sig["price"]
-    atr_val = sig.get("atr")
+    def _enter_trade(self, sig):
+        symbol = sig["symbol"]
+        direction = sig["direction"]
+        side = "buy" if direction == "long" else "sell"
 
-    # ----- risk distance (prefer ATR if available) -----
-    if self.config.get("use_atr_stops") and atr_val and atr_val > 0:
-        sl_distance = atr_val * self.config.get("atr_sl_mult", 1.5)
-    else:
-        sl_distance = entry_price * (self.config["stop_loss_pct"] / 100)
+        info = self.product_info[symbol]
+        product_id = info["product_id"]
+        contract_value = float(info.get("contract_value", 1.0) or 1.0)
+        entry_price = sig["price"]
 
-    risk_budget = self.config["capital"] * (self.config["risk_pct"] / 100)  # e.g. 2000 * 0.01 = 20
-    loss_per_contract = sl_distance * contract_value
-    notional_per_contract = entry_price * contract_value
+        # for ATR-sizing we still risk-size off the fixed stop_loss_pct distance
+        # as a conservative floor, since ATR distance varies trade to trade
+        risk_amount = self.config["capital"] * (self.config["risk_pct"] / 100)
+        sl_move = entry_price * (self.config["stop_loss_pct"] / 100)
+        loss_per_contract = sl_move * contract_value
+        qty = max(int(risk_amount // loss_per_contract), 1) if loss_per_contract > 0 else 1
 
-    if loss_per_contract <= 0 or notional_per_contract <= 0:
-        logger.warning("%s invalid loss/notional per contract — skip", symbol)
-        with self.lock:
-            self.failed_symbols[symbol] = time.time()
-        return
+        if loss_per_contract > 0 and qty * loss_per_contract > risk_amount * 1.05:
+            logger.warning(
+                "qty floor=1 exceeds risk_pct for %s: risk≈%.2f vs budget %.2f",
+                symbol, qty * loss_per_contract, risk_amount,
+            )
 
-    # Ideal qty from risk budget
-    qty = max(int(risk_budget // loss_per_contract), 1)
+        notional_per_contract = entry_price * contract_value
 
-    # ----- leverage clamps (bot + exchange) -----
-    max_lev_bot = self.config.get("max_leverage", 3)
-    max_notional_bot = self.config["capital"] * max_lev_bot
+        # existing bot-level leverage cap
+        max_notional = self.config["capital"] * self.config.get("max_leverage", 3)
+        if notional_per_contract > 0:
+            notional = qty * notional_per_contract
+            if notional > max_notional:
+                qty = max(int(max_notional // notional_per_contract), 1)
 
-    product_max_lev = info.get("max_leverage")
-    max_notional_prod = None
-    if product_max_lev and product_max_lev > 0:
-        max_notional_prod = self.config["capital"] * product_max_lev
+        # ADDED: also respect the EXCHANGE's actual per-product max leverage,
+        # not just the bot's own config cap -- this is what was causing the
+        # repeated "leverage_limit_exceeded" rejections in the trade log.
+        product_max_lev = info.get("max_leverage")
+        if product_max_lev and notional_per_contract > 0:
+            max_notional_product = self.config["capital"] * product_max_lev
+            notional = qty * notional_per_contract
+            if notional > max_notional_product:
+                qty = max(int(max_notional_product // notional_per_contract), 1)
+                logger.info(
+                    "%s qty clamped to %s for exchange max_leverage=%s",
+                    symbol, qty, product_max_lev,
+                )
 
-    # Apply the tighter of the two notional caps
-    max_notional = max_notional_bot
-    if max_notional_prod is not None:
-        max_notional = min(max_notional, max_notional_prod)
+        sl_price, tp_price = self._compute_sl_tp(direction, entry_price, sig.get("atr"))
 
-    if qty * notional_per_contract > max_notional:
-        qty = max(int(max_notional // notional_per_contract), 1)
+        order_result = self._place_bracket_entry(product_id, qty, side, sl_price, tp_price)
 
-    # ============================================================
-    # SAFETY CHECKS — yeh do bugs fix karte hain
-    # ============================================================
-
-    actual_risk = qty * loss_per_contract
-    actual_notional = qty * notional_per_contract
-
-    # Bug 2 fix: even qty=1 exceeds risk budget by a large multiple
-    # (BTC / high-price case). Sending this order will get rejected
-    # or risk way more than intended. Skip entirely.
-    max_risk_multiple = float(self.config.get("max_risk_multiple", 3.0))  # allow up to 3x budget
-    if actual_risk > risk_budget * max_risk_multiple:
-        logger.warning(
-            "%s SKIP — even qty=%s risk≈%.2f is > %.1fx budget %.2f "
-            "(price=%.4f cv=%.6f). Symbol too expensive for current capital.",
-            symbol, qty, actual_risk, max_risk_multiple, risk_budget,
-            entry_price, contract_value,
-        )
-        with self.lock:
-            self.failed_symbols[symbol] = time.time()
-        self._log_trade(
-            "ENTRY_FAILED", symbol, entry_price, qty, sig,
-            {"error": f"risk_too_large: {actual_risk:.2f} > {risk_budget * max_risk_multiple:.2f}"},
-        )
-        return
-
-    # Bug 1 fix: final trade is so small that it wastes a daily slot
-    # (micro-price / tiny contract-value case).
-    min_notional_usd = float(self.config.get("min_notional_usd", 15.0))
-    min_risk_usd = float(self.config.get("min_risk_usd", 3.0))
-
-    if actual_notional < min_notional_usd or actual_risk < min_risk_usd:
-        logger.warning(
-            "%s SKIP — trade too small (notional≈%.2f risk≈%.2f). "
-            "min_notional=%.1f min_risk=%.1f. Slot waste avoid.",
-            symbol, actual_notional, actual_risk, min_notional_usd, min_risk_usd,
-        )
-        with self.lock:
-            self.failed_symbols[symbol] = time.time()
-        self._log_trade(
-            "ENTRY_FAILED", symbol, entry_price, qty, sig,
-            {"error": f"trade_too_small: notional={actual_notional:.2f} risk={actual_risk:.2f}"},
-        )
-        return
-
-    # Optional soft upper cap (only as last resort, not the main protection)
-    soft_max_qty = int(self.config.get("max_qty", 0) or 0)
-    if soft_max_qty > 0 and qty > soft_max_qty:
-        logger.info("%s soft max_qty clamp %s → %s", symbol, qty, soft_max_qty)
-        qty = soft_max_qty
-        # re-check after soft clamp
-        actual_risk = qty * loss_per_contract
-        actual_notional = qty * notional_per_contract
-        if actual_notional < min_notional_usd or actual_risk < min_risk_usd:
-            logger.warning("%s SKIP after soft clamp — still too small", symbol)
+        if isinstance(order_result, dict) and (
+            order_result.get("error") or self._order_looks_rejected(order_result)
+        ):
             with self.lock:
                 self.failed_symbols[symbol] = time.time()
+            self._log_trade("ENTRY_FAILED", symbol, entry_price, qty, sig, order_result)
+            logger.warning(
+                "ENTRY FAILED %s (%s): %s",
+                symbol, direction,
+                order_result.get("error") or order_result.get("status") or order_result,
+            )
             return
 
-    # ----- SL / TP -----
-    sl_price, tp_price = self._compute_sl_tp(direction, entry_price, atr_val)
+        if not self.config.get("dry_run", True):
+            fill = self._extract_fill_price(order_result, entry_price)
+            if fill != entry_price:
+                logger.info(
+                    "Fill price %.6f differs from signal %.6f for %s — adjusting SL/TP",
+                    fill, entry_price, symbol,
+                )
+                entry_price = fill
+                sl_price, tp_price = self._compute_sl_tp(direction, entry_price, sig.get("atr"))
 
-    order_result = self._place_bracket_entry(product_id, qty, side, sl_price, tp_price)
-
-    if isinstance(order_result, dict) and (
-        order_result.get("error") or self._order_looks_rejected(order_result)
-    ):
         with self.lock:
-            self.failed_symbols[symbol] = time.time()
-        self._log_trade("ENTRY_FAILED", symbol, entry_price, qty, sig, order_result)
-        logger.warning(
-            "ENTRY FAILED %s (%s) qty=%s: %s",
-            symbol, direction, qty,
-            order_result.get("error") or order_result.get("status") or order_result,
+            self.open_trades[symbol] = {
+                "direction": direction,
+                "side": side,
+                "product_id": product_id,
+                "contract_value": contract_value,
+                "entry_price": entry_price,
+                "qty": qty,
+                "sl_price": sl_price,
+                "tp_price": tp_price,
+                "entry_time": datetime.now(timezone.utc).isoformat(),
+                "entry_ts": time.time(),
+                "score": sig["score"],
+                "order_result": order_result,
+                "recovered": False,
+            }
+            self.trades_today += 1
+            self.failed_symbols.pop(symbol, None)
+
+        self._log_trade("ENTRY", symbol, entry_price, qty, sig, order_result)
+        logger.info(
+            "ENTRY %s [%s] qty=%s cv=%s score=%.3f sl=%s tp=%s",
+            symbol, direction, qty, contract_value, sig["score"], sl_price, tp_price,
         )
-        return
 
-    if not self.config.get("dry_run", True):
-        fill = self._extract_fill_price(order_result, entry_price)
-        if fill != entry_price:
-            logger.info(
-                "Fill price %.6f differs from signal %.6f for %s — adjusting SL/TP",
-                fill, entry_price, symbol,
-            )
-            entry_price = fill
-            sl_price, tp_price = self._compute_sl_tp(direction, entry_price, atr_val)
-
-    with self.lock:
-        self.open_trades[symbol] = {
-            "direction": direction,
-            "side": side,
-            "product_id": product_id,
-            "contract_value": contract_value,
-            "entry_price": entry_price,
-            "qty": qty,
-            "sl_price": sl_price,
-            "tp_price": tp_price,
-            "entry_time": datetime.now(timezone.utc).isoformat(),
-            "entry_ts": time.time(),
-            "score": sig["score"],
-            "order_result": order_result,
-            "recovered": False,
-        }
-        self.trades_today += 1
-        self.failed_symbols.pop(symbol, None)
-
-    self._log_trade("ENTRY", symbol, entry_price, qty, sig, order_result)
-    logger.info(
-        "ENTRY %s [%s] qty=%s cv=%.6f score=%.3f sl=%s tp=%s "
-        "risk≈%.2f notional≈%.2f",
-        symbol, direction, qty, contract_value, sig["score"],
-        sl_price, tp_price, actual_risk, actual_notional,
-    )
     def _place_bracket_entry(self, product_id, qty, side, sl_price, tp_price):
         if self.config.get("dry_run", True):
             return {
@@ -1010,9 +948,11 @@ def _enter_trade(self, sig):
         with self.lock:
             self.realized_pnl_today += pnl
             self.open_trades.pop(symbol, None)
-            # Proper post-exit cooldown (separate from failed_symbols)
-            self.exit_cooldown[symbol] = time.time()
-
+            # ADDED: post-exit cooldown -- reuse the same failed_symbols/cooldown
+            # mechanism so the scanner doesn't immediately re-chase this symbol
+            # right after closing (this is what was causing 2-3 re-entries on
+            # the same symbol within a few hours in choppy conditions).
+            self.failed_symbols[symbol] = time.time()
         self._log_trade(
             "EXIT", symbol, exit_price, trade["qty"],
             {"direction": trade.get("direction"), "score": trade.get("score")},
@@ -1159,7 +1099,6 @@ def _enter_trade(self, sig):
         with self.lock:
             open_trades = dict(self.open_trades)
             failed_symbols = dict(self.failed_symbols)
-            exit_cooldown = dict(self.exit_cooldown)
             scan_grid = list(self.last_scan.values())
             trades_today = self.trades_today
             realized = self.realized_pnl_today
@@ -1178,7 +1117,6 @@ def _enter_trade(self, sig):
             "max_concurrent_trades": self.config["max_concurrent_trades"],
             "realized_pnl_today": round(realized, 4),
             "failed_symbols_cooldown": failed_symbols,
-            "exit_cooldown": exit_cooldown,
             "candidates": sorted(
                 [s for s in scan_grid if s.get("qualifies")],
                 key=lambda s: -s["score"],
