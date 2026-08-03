@@ -1,39 +1,9 @@
 """
 websocket_feed.py -- Delta Exchange WebSocket client (public + private).
-
-This is a drop-in companion/replacement for a REST-polling MarketDataFeed.
-Instead of hitting /v2/tickers, /v2/history/candles etc. on a timer, this
-keeps two persistent connections open and updates in-memory state as
-messages arrive:
-
-  - Public socket  (wss://public-socket.india.delta.exchange)
-      channels: ticker, candlestick_<resolution>, ob_l1, mark_price
-  - Private socket (wss://socket.india.delta.exchange)
-      channels: orders, positions, margins  (needs key-auth)
-
-Why switch from REST polling to this:
-  - Saves rate-limit quota (REST tickers/candles calls cost weight 3 each,
-    multiplied across your whole Nifty50-style watchlist, every poll).
-  - Much lower latency -- ticker pushes every 5s, ob_l1 every 100ms,
-    fills/positions are pushed the instant they happen instead of waiting
-    for the next poll cycle.
-
-Usage:
-    from websocket_feed import DeltaWebSocketFeed
-
-    feed = DeltaWebSocketFeed(
-        symbols=["BTCUSD", "ETHUSD"],
-        candle_resolutions=["1m", "5m"],
-        api_key=os.getenv("DELTA_API_KEY"),
-        api_secret=os.getenv("DELTA_API_SECRET"),
-        enable_private=True,
-    )
-    feed.start()
-
-    feed.get_ticker("BTCUSD")
-    feed.get_candles("BTCUSD", "1m")
-    feed.get_positions()
-    feed.get_orders()
+FIXED: rolling candle history buffer + normalized OHLCV keys + safe float
+conversion, so this is a true drop-in replacement for the REST-polling feed
+that strategy.py expects (get_candles(symbol, limit) returning a list of
+{"time","open","high","low","close","volume"} dicts, oldest first).
 """
 
 import json
@@ -41,6 +11,7 @@ import time
 import hmac
 import hashlib
 import threading
+from collections import deque
 
 import websocket  # pip install websocket-client
 
@@ -49,10 +20,56 @@ PRIVATE_WS_URL = "wss://socket.india.delta.exchange"
 
 RECONNECT_DELAY_SEC = 5
 HEARTBEAT_TIMEOUT_SEC = 35  # server sends heartbeat every 30s; 35s = 5s buffer
+CANDLE_HISTORY_MAXLEN = 500  # enough for EMA/RSI/ADX warmup + headroom
 
 
 def _sign(secret, message):
     return hmac.new(secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _safe_float(val):
+    """Never let a None/garbage value blow up downstream indicator math --
+    return None instead of raising, and let the caller decide to skip."""
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_candle(raw):
+    """
+    Delta's public websocket candlestick_<res> payload uses abbreviated
+    keys. This maps them onto the same shape strategy.py already expects
+    from the REST feed (open/high/low/close/volume/time), so nothing
+    downstream needs to change.
+
+    NOTE: confirm the exact abbreviated key names against Delta's current
+    WS docs before going live -- if they differ, only this function needs
+    updating, everything else stays the same.
+    """
+    o = _safe_float(raw.get("o") if "o" in raw else raw.get("open"))
+    h = _safe_float(raw.get("h") if "h" in raw else raw.get("high"))
+    l = _safe_float(raw.get("l") if "l" in raw else raw.get("low"))
+    c = _safe_float(raw.get("c") if "c" in raw else raw.get("close"))
+    v = _safe_float(raw.get("v") if "v" in raw else raw.get("volume"))
+    t = raw.get("t") if "t" in raw else raw.get("time")
+
+    # A candle missing close/high/low is useless (and is exactly what
+    # would previously have caused a float(None) crash downstream) --
+    # signal "skip this one" by returning None instead of a half-built dict.
+    if c is None or h is None or l is None or t is None:
+        return None
+
+    return {
+        "time": t,
+        "open": o if o is not None else c,
+        "high": h,
+        "low": l,
+        "close": c,
+        "volume": v if v is not None else 0.0,
+    }
 
 
 class DeltaWebSocketFeed:
@@ -60,18 +77,18 @@ class DeltaWebSocketFeed:
                  enable_private=False, on_order_update=None, on_position_update=None):
         self.symbols = [s.upper() for s in symbols]
         self.candle_resolutions = candle_resolutions or ["1m"]
+        self.default_resolution = self.candle_resolutions[0]
         self.api_key = api_key
         self.api_secret = api_secret
         self.enable_private = enable_private and bool(api_key and api_secret)
 
-        # optional callbacks so strategy.py can react immediately to
-        # fills/position changes instead of polling get_positions()/get_orders()
         self.on_order_update = on_order_update
         self.on_position_update = on_position_update
 
         self._lock = threading.Lock()
         self._tickers = {}          # symbol -> latest ticker dict
-        self._candles = {}          # (symbol, resolution) -> latest candle dict
+        # ADDED: rolling history instead of "latest only"
+        self._candle_history = {}   # (symbol, resolution) -> deque of normalized candles
         self._ob_l1 = {}            # symbol -> best bid/ask dict
         self._positions = {}        # symbol -> position dict
         self._orders = {}           # order_id -> order dict
@@ -126,9 +143,6 @@ class DeltaWebSocketFeed:
         threading.Thread(target=self._watch_public_heartbeat, daemon=True).start()
 
     def _watch_public_heartbeat(self):
-        """If no heartbeat arrives for HEARTBEAT_TIMEOUT_SEC, force a
-        reconnect -- some networks silently drop the TCP connection
-        without a clean close event."""
         self._public_last_heartbeat = time.time()
         while not self._stop and self._public_ws:
             time.sleep(5)
@@ -141,32 +155,54 @@ class DeltaWebSocketFeed:
                 return
 
     def _on_public_message(self, ws, message):
+        # ADDED: wrap the whole handler -- a single malformed message must
+        # never be able to kill this callback (and by extension silently
+        # stall the feed) again.
         try:
             data = json.loads(message)
         except ValueError:
             return
 
-        msg_type = data.get("type")
-        if msg_type == "heartbeat":
-            self._public_last_heartbeat = time.time()
-            return
+        try:
+            msg_type = data.get("type")
+            if msg_type == "heartbeat":
+                self._public_last_heartbeat = time.time()
+                return
 
-        with self._lock:
-            if msg_type == "ticker":
-                symbol = data.get("sy")
-                if symbol:
-                    self._tickers[symbol] = data
-            elif msg_type and msg_type.startswith("candlestick_"):
-                symbol = data.get("sy")
-                resolution = data.get("res")
-                if symbol and resolution:
-                    self._candles[(symbol, resolution)] = data
-            elif msg_type == "ob_l1":
-                symbol = data.get("sy")
-                if symbol:
-                    self._ob_l1[symbol] = data
-            elif msg_type == "subscriptions":
-                print(f"[ws-public] subscribed: {data.get('channels')}")
+            with self._lock:
+                if msg_type == "ticker":
+                    symbol = data.get("sy")
+                    if symbol:
+                        self._tickers[symbol] = data
+                elif msg_type and msg_type.startswith("candlestick_"):
+                    symbol = data.get("sy")
+                    resolution = data.get("res") or msg_type.replace("candlestick_", "")
+                    if symbol and resolution:
+                        candle = _normalize_candle(data)
+                        if candle is None:
+                            # incomplete/garbage tick -- skip, don't crash,
+                            # don't poison the history buffer
+                            return
+                        key = (symbol, resolution)
+                        if key not in self._candle_history:
+                            self._candle_history[key] = deque(maxlen=CANDLE_HISTORY_MAXLEN)
+                        hist = self._candle_history[key]
+                        # replace last candle if same timestamp (still forming),
+                        # else append a new one (candle closed)
+                        if hist and hist[-1]["time"] == candle["time"]:
+                            hist[-1] = candle
+                        else:
+                            hist.append(candle)
+                elif msg_type == "ob_l1":
+                    symbol = data.get("sy")
+                    if symbol:
+                        self._ob_l1[symbol] = data
+                elif msg_type == "subscriptions":
+                    print(f"[ws-public] subscribed: {data.get('channels')}")
+        except Exception as e:
+            # ADDED: last-resort guard so a single bad message can't kill
+            # the on_message callback / stall the feed silently
+            print(f"[ws-public] message handling error: {e}")
 
     # -----------------------------------------------------------------
     # Private socket (orders, positions, margins)
@@ -206,39 +242,42 @@ class DeltaWebSocketFeed:
         except ValueError:
             return
 
-        msg_type = data.get("type")
+        try:
+            msg_type = data.get("type")
 
-        if msg_type == "key-auth":
-            if data.get("success"):
-                print("[ws-private] authenticated")
-                self._subscribe(ws, "orders", self.symbols)
-                self._subscribe(ws, "positions", self.symbols)
-                self._subscribe(ws, "margins", [])
-            else:
-                print(f"[ws-private] auth failed: {data}")
-            return
+            if msg_type == "key-auth":
+                if data.get("success"):
+                    print("[ws-private] authenticated")
+                    self._subscribe(ws, "orders", self.symbols)
+                    self._subscribe(ws, "positions", self.symbols)
+                    self._subscribe(ws, "margins", [])
+                else:
+                    print(f"[ws-private] auth failed: {data}")
+                return
 
-        with self._lock:
-            if msg_type == "orders":
-                order_id = data.get("order_id")
-                action = data.get("action")
-                if order_id is not None:
-                    if action == "delete":
-                        self._orders.pop(order_id, None)
-                    else:
-                        self._orders[order_id] = data
-                if self.on_order_update:
-                    self.on_order_update(data)
-            elif msg_type == "positions":
-                symbol = data.get("symbol")
-                action = data.get("action")
-                if symbol:
-                    if action == "delete":
-                        self._positions.pop(symbol, None)
-                    else:
-                        self._positions[symbol] = data
-                if self.on_position_update:
-                    self.on_position_update(data)
+            with self._lock:
+                if msg_type == "orders":
+                    order_id = data.get("order_id")
+                    action = data.get("action")
+                    if order_id is not None:
+                        if action == "delete":
+                            self._orders.pop(order_id, None)
+                        else:
+                            self._orders[order_id] = data
+                    if self.on_order_update:
+                        self.on_order_update(data)
+                elif msg_type == "positions":
+                    symbol = data.get("symbol")
+                    action = data.get("action")
+                    if symbol:
+                        if action == "delete":
+                            self._positions.pop(symbol, None)
+                        else:
+                            self._positions[symbol] = data
+                    if self.on_position_update:
+                        self.on_position_update(data)
+        except Exception as e:
+            print(f"[ws-private] message handling error: {e}")
 
     # -----------------------------------------------------------------
     # Shared helpers
@@ -251,7 +290,7 @@ class DeltaWebSocketFeed:
         ws.send(json.dumps({"type": "subscribe", "payload": {"channels": [payload]}}))
 
     # -----------------------------------------------------------------
-    # Public read accessors -- safe to call from Flask routes
+    # Public read accessors -- safe to call from Flask routes / strategy.py
     # -----------------------------------------------------------------
     def get_ticker(self, symbol):
         with self._lock:
@@ -261,9 +300,25 @@ class DeltaWebSocketFeed:
         with self._lock:
             return dict(self._tickers)
 
-    def get_candle(self, symbol, resolution="1m"):
+    def get_candle(self, symbol, resolution=None):
+        """Latest single candle (kept for backward compat)."""
+        resolution = resolution or self.default_resolution
         with self._lock:
-            return self._candles.get((symbol.upper(), resolution))
+            hist = self._candle_history.get((symbol.upper(), resolution))
+            return hist[-1] if hist else None
+
+    # ADDED: this is the method strategy.py actually calls --
+    # feed.get_candles(symbol, limit=300) / feed.get_candles(symbol, limit=2)
+    def get_candles(self, symbol, limit=None, resolution=None):
+        resolution = resolution or self.default_resolution
+        with self._lock:
+            hist = self._candle_history.get((symbol.upper(), resolution))
+            if not hist:
+                return []
+            data = list(hist)
+        if limit:
+            data = data[-limit:]
+        return data
 
     def get_ob_l1(self, symbol):
         with self._lock:
@@ -281,8 +336,10 @@ class DeltaWebSocketFeed:
         with self._lock:
             return dict(self._orders)
 
+    def get_symbols(self):
+        return list(self.symbols)
+
     def add_symbol(self, symbol):
-        """Subscribe to a new symbol at runtime without reconnecting."""
         symbol = symbol.upper()
         if symbol in self.symbols:
             return False

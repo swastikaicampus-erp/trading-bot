@@ -14,6 +14,22 @@ SUBSCRIBE_CHUNK_SIZE = 50  # Delta ko ek hi message me 100+ symbols bhejna
                             # undocumented hai) -- isliye chunks me bhejte hain.
 
 
+def _safe_float(val, default=0.0):
+    """ADDED: Delta's WS occasionally sends a candle field as an explicit
+    null (key present, value None) rather than omitting the key -- dict.get's
+    default only kicks in when the key is MISSING, not when it's None. That
+    mismatch was causing float(None) -> TypeError inside _on_message, which
+    (being unwrapped) could kill/destabilize the ws callback and trigger the
+    crash -> reconnect -> crash loop. This helper makes every numeric field
+    null-safe."""
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
 def discover_perpetual_futures_symbols(quote_assets=None):
     """
     Delta ke /v2/products se saare LIVE perpetual futures symbols nikalta
@@ -193,13 +209,14 @@ class MarketDataFeed:
                 [
                     {
                         "time": c["time"],
-                        "open": float(c["open"]),
-                        "high": float(c["high"]),
-                        "low": float(c["low"]),
-                        "close": float(c["close"]),
-                        "volume": float(c.get("volume", 0)),
+                        "open": _safe_float(c.get("open")),
+                        "high": _safe_float(c.get("high")),
+                        "low": _safe_float(c.get("low")),
+                        "close": _safe_float(c.get("close")),
+                        "volume": _safe_float(c.get("volume")),
                     }
                     for c in result
+                    if c.get("time") is not None  # ADDED: skip rows with no timestamp
                 ],
                 key=lambda c: c["time"],
             )
@@ -286,6 +303,16 @@ class MarketDataFeed:
             self._subscribe(ws, f"candlestick_{RESOLUTION}", chunk)
 
     def _on_message(self, ws, message):
+        # ADDED: wrap the entire handler -- a single malformed message
+        # (e.g. a candle field sent as explicit null) must never be able
+        # to propagate an unhandled exception out of this callback. That
+        # was the actual trigger for the crash -> reconnect -> crash loop.
+        try:
+            self._handle_message(message)
+        except Exception as e:
+            print(f"[market_data] on_message error (ignored, feed continues): {e}")
+
+    def _handle_message(self, message):
         try:
             msg = json.loads(message)
         except Exception:
@@ -310,13 +337,24 @@ class MarketDataFeed:
                 }
 
         elif msg_type.startswith("candlestick_"):
+            candle_time = msg.get("candle_start_time", msg.get("timestamp"))
+            if candle_time is None:
+                # CHANGED: no usable timestamp -> this tick can't be placed
+                # in the series at all, skip it instead of storing garbage
+                return
+
             candle = {
-                "time": msg.get("candle_start_time", msg.get("timestamp")),
-                "open": float(msg.get("open", 0)),
-                "high": float(msg.get("high", 0)),
-                "low": float(msg.get("low", 0)),
-                "close": float(msg.get("close", 0)),
-                "volume": float(msg.get("volume", 0)),
+                "time": candle_time,
+                # CHANGED: float(msg.get("open", 0)) -> _safe_float(msg.get("open"))
+                # Root cause: when Delta sends a field as an explicit null
+                # (key present, value None), dict.get's default does NOT
+                # kick in (it only applies when the key is missing), so
+                # float(None) was raised here uncaught.
+                "open": _safe_float(msg.get("open")),
+                "high": _safe_float(msg.get("high")),
+                "low": _safe_float(msg.get("low")),
+                "close": _safe_float(msg.get("close")),
+                "volume": _safe_float(msg.get("volume")),
             }
             with self._lock:
                 series = self.candles.get(symbol)
