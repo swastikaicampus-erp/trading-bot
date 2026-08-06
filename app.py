@@ -199,7 +199,6 @@ def _delta_json_response(ok, status_code, data):
         return jsonify({"success": True, "data": data.get("result", data)})
     return jsonify({"success": False, "error": _friendly_error(data)}), status_code if status_code >= 400 else 400
 
-
 def _place_order_for_strategy(order_body):
     """Strategy entry path: soft-set leverage then place bracket market order."""
     product_id = order_body.get("product_id")
@@ -211,8 +210,8 @@ def _place_order_for_strategy(order_body):
                 f"/v2/products/{product_id}/orders/leverage",
                 body={"leverage": lev},
             )
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[strategy] leverage set failed for product {product_id}: {e}")
 
     ok, status, data = _signed_request("POST", "/v2/orders", body=order_body)
     if ok:
@@ -333,6 +332,25 @@ def health():
     })
 
 
+@app.route("/system/status", methods=["GET"])
+def system_status():
+    st = strategy.status()
+    symbols_count = len(feed.get_symbols())
+    clock_info = _check_clock_drift()
+    return jsonify({
+        "status": "ok",
+        "dry_run": DRY_RUN,
+        "symbols_monitored": symbols_count,
+        "feed_running": feed._running if hasattr(feed, "_running") else True,
+        "strategy_running": st.get("is_running", False),
+        "active_trades_count": len(st.get("open_positions", {})),
+        "clock_drift_seconds": clock_info.get("drift_seconds", 0),
+        "clock_synced": clock_info.get("ok", True),
+        "base_url": BASE_URL,
+        "timestamp": int(time.time()),
+    })
+
+
 @app.route("/rate-limit", methods=["GET"])
 def rate_limit_quota():
     """GET /v2/rate_limits/quota -- unauthenticated. Useful to poll from
@@ -444,10 +462,13 @@ def change_position_margin():
     """POST /v2/positions/change_margin -- delta_margin positive to add,
     negative to remove."""
     data = request.json or {}
-    body = {
-        "product_id": data.get("product_id"),
-        "delta_margin": str(data.get("delta_margin")),
-    }
+    product_id = data.get("product_id")
+    delta_margin = data.get("delta_margin")
+
+    if product_id is None or delta_margin is None:
+        return jsonify({"success": False, "error": "product_id and delta_margin are required"}), 400
+
+    body = {"product_id": product_id, "delta_margin": str(delta_margin)}
     ok, status, resp_data = _signed_request("POST", "/v2/positions/change_margin", body=body)
     return _delta_json_response(ok, status, resp_data)
 
