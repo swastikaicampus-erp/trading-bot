@@ -57,29 +57,30 @@ DEFAULT_CONFIG = {
     "fast_ema": 9,
     "slow_ema": 21,
 
-    # momentum filter -- LONG                      # CHANGED: tighter band, avoid extended entries
+    # momentum filter -- LONG (widened band so momentum moves aren't instantly rejected)
     "rsi_period": 14,
-    "rsi_floor": 45,
-    "rsi_overbought": 65,
+    "rsi_floor": 40,
+    "rsi_overbought": 75,
 
-    # momentum filter -- SHORT                      # CHANGED
-    "rsi_short_floor": 35,
-    "rsi_short_ceiling": 55,
+    # momentum filter -- SHORT
+    "rsi_short_floor": 25,
+    "rsi_short_ceiling": 60,
 
-    # trend filter
+    # trend filter (lowered ADX threshold from 30 -> 18 to capture standard crypto trends)
     "adx_period": 14,
-    "adx_threshold": 30,                            # CHANGED: 25 -> 30, filter weak trends
-    "require_adx_rising": True,
+    "adx_threshold": 18,
+    "require_adx_rising": False,
 
-    # avoid microscopic EMA crosses
-    "min_ema_separation_pct": 0.15,                 # CHANGED: 0.12 -> 0.15
+    # microscopic EMA cross filter
+    "min_ema_separation_pct": 0.02,
 
-    # require 2-candle confirmation on the EMA cross, not just current candle  # ADDED
-    "require_cross_confirmation": True,
+    # EMA cross lookback window (candles)
+    "cross_lookback_candles": 3,
+    "require_cross_confirmation": False,
 
-    # volume filter
+    # volume filter (1.1x = 10% above 20-period average)
     "volume_lookback": 20,
-    "volume_multiplier": 2.0,                       # CHANGED: 1.8 -> 2.0
+    "volume_multiplier": 1.1,
 
     # vwap filter
     "vwap_filter": True,
@@ -91,10 +92,10 @@ DEFAULT_CONFIG = {
 
     # --- stop / target ---------------------------------------------------
     # fixed-% fallback (used when use_atr_stops is False or ATR unavailable)
-    "stop_loss_pct": 1.5,                           # CHANGED: 0.8 -> 1.5
-    "target_pct": 3.0,                              # CHANGED: 2.0 -> 3.0
+    "stop_loss_pct": 1.5,
+    "target_pct": 3.0,
 
-    # ATR-based stops -- per-symbol volatility instead of one fixed %  # ADDED
+    # ATR-based stops -- per-symbol volatility instead of fixed %
     "use_atr_stops": True,
     "atr_period": 14,
     "atr_sl_mult": 1.5,
@@ -107,21 +108,20 @@ DEFAULT_CONFIG = {
     "allow_long": True,
     "allow_short": True,
 
-    # minimum score to even consider a candidate (0-1 scale)  # ADDED
-    "min_score_threshold": 0.55,
+    # minimum score threshold
+    "min_score_threshold": 0.30,
 
     # portfolio-level limits
-    "max_trades_per_day": 2,                        # CHANGED: 3 -> 2
-    "max_concurrent_trades": 1,                     # CHANGED: 2 -> 1
+    "max_trades_per_day": 10,
+    "max_concurrent_trades": 3,
     "max_daily_loss": 1000,
 
     "scan_interval_sec": 5,
     "monitor_interval_sec": 10,
     "failed_retry_cooldown_sec": 300,
 
-    # cooldown applied to a symbol right after ANY exit (win or loss),      # ADDED
-    # so the bot doesn't immediately re-chase the same symbol into chop
-    "post_exit_cooldown_sec": 900,
+    # post-exit cooldown (seconds)
+    "post_exit_cooldown_sec": 300,
 
     "dry_run_max_hold_sec": 3600,
 
@@ -132,7 +132,7 @@ EDITABLE_CONFIG_KEYS = [
     "fast_ema", "slow_ema", "rsi_period", "rsi_floor", "rsi_overbought",
     "rsi_short_floor", "rsi_short_ceiling",
     "adx_period", "adx_threshold", "require_adx_rising", "min_ema_separation_pct",
-    "require_cross_confirmation",
+    "cross_lookback_candles", "require_cross_confirmation",
     "volume_lookback", "volume_multiplier",
     "vwap_filter", "capital", "risk_pct",
     "stop_loss_pct", "target_pct",
@@ -393,20 +393,21 @@ def compute_diagnostics(symbol, candles, config):
     curr_price = closes[-1]
     curr_atr = atr_vals[-1] if atr_vals else None   # ADDED
 
-    # ---- ADDED: 2-candle confirmation on the cross ----------------------
-    # Old behaviour looked only at prev vs curr candle, which fires on the
-    # very first tick past the cross and gets whipsawed by an immediate
-    # pullback. Now we require the cross to have *already happened* one
-    # candle back, and still be holding on the current candle.
-    if config.get("require_cross_confirmation", True) and len(fast) >= 3:
-        prior_fast, prior_slow = fast[-3], slow[-3]
-        crossed_up_1_ago = prior_fast <= prior_slow and prev_fast > prev_slow
-        crossed_down_1_ago = prior_fast >= prior_slow and prev_fast < prev_slow
-        fresh_cross_up = crossed_up_1_ago and curr_fast > curr_slow
-        fresh_cross_down = crossed_down_1_ago and curr_fast < curr_slow
-    else:
-        fresh_cross_up = prev_fast <= prev_slow and curr_fast > curr_slow
-        fresh_cross_down = prev_fast >= prev_slow and curr_fast < curr_slow
+    # ---- EMA cross detection logic (supports lookback window) ------------
+    cross_lookback = int(config.get("cross_lookback_candles", 3) or 1)
+    fresh_cross_up = False
+    fresh_cross_down = False
+    n_fast = len(fast)
+    if n_fast >= 2:
+        for i in range(1, min(cross_lookback + 1, n_fast - 1)):
+            if fast[-i - 1] <= slow[-i - 1] and fast[-i] > slow[-i]:
+                if curr_fast > curr_slow:
+                    fresh_cross_up = True
+                    break
+            if fast[-i - 1] >= slow[-i - 1] and fast[-i] < slow[-i]:
+                if curr_fast < curr_slow:
+                    fresh_cross_down = True
+                    break
     # -----------------------------------------------------------------------
 
     trend_aligned = curr_fast > curr_slow

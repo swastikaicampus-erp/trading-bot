@@ -11,9 +11,10 @@ import requests
 import urllib3.util.connection as urllib3_conn
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+# pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
+# pyrefly: ignore [missing-import]
 from delta_rest_client import DeltaRestClient
-
 from market_data import MarketDataFeed, discover_perpetual_futures_symbols
 from strategy import StrategyManager
 
@@ -1066,6 +1067,12 @@ def strategy_stop():
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5002))
+
+    # Auto-start strategy scanner so it begins scanning watchlist immediately
+    AUTO_START_STRATEGY = os.getenv("AUTO_START_STRATEGY", "true").lower() == "true"
+    if AUTO_START_STRATEGY:
+        strategy.start()
+        print(f"[startup] Strategy scanner auto-started over {len(strategy.symbols)} symbols")
 
     # If HEARTBEAT_ENABLED=true in .env, assume /heartbeat/setup was
     # already called once (or config never changes) and auto-start the
