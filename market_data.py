@@ -300,7 +300,9 @@ class MarketDataFeed:
         print(f"[market_data] ws connected, subscribing {len(symbols)} symbols in chunks of {SUBSCRIBE_CHUNK_SIZE}")
         for chunk in _chunks(symbols, SUBSCRIBE_CHUNK_SIZE):
             self._subscribe(ws, "v2/ticker", chunk)
+            time.sleep(0.1)
             self._subscribe(ws, f"candlestick_{RESOLUTION}", chunk)
+            time.sleep(0.1)
 
     def _on_message(self, ws, message):
         # ADDED: wrap the entire handler -- a single malformed message
