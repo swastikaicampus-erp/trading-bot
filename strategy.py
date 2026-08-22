@@ -106,7 +106,10 @@ DEFAULT_CONFIG = {
 
     # direction control
     "allow_long": True,
-    "allow_short": True,
+    "allow_short": False,
+
+    # symbol blacklist -- toxic or ultra-illiquid altcoins to skip
+    "symbol_blacklist": ["AVAAIUSD", "LABUSD", "PUMPUSD", "BMTUSD", "BBUSD", "AKEUSD", "VELVETUSD", "HUSD", "AIOUSD", "SNDKBUSD"],
 
     # minimum score threshold
     "min_score_threshold": 0.30,
@@ -138,7 +141,7 @@ EDITABLE_CONFIG_KEYS = [
     "stop_loss_pct", "target_pct",
     "use_atr_stops", "atr_period", "atr_sl_mult", "atr_tp_mult",
     "max_leverage", "fee_rate_round_trip",
-    "allow_long", "allow_short",
+    "allow_long", "allow_short", "symbol_blacklist",
     "min_score_threshold",
     "max_trades_per_day", "max_concurrent_trades",
     "max_daily_loss", "scan_interval_sec", "monitor_interval_sec",
@@ -361,6 +364,20 @@ def compute_diagnostics(symbol, candles, config):
         "vwap_long_ok": False, "vwap_short_ok": False, "volume_ok": False,
         "ema_sep_ok": False,
     }
+    blacklist = config.get("symbol_blacklist") or []
+    if symbol in blacklist:
+        return {
+            "symbol": symbol,
+            "insufficient_data": False,
+            "qualifies": False,
+            "direction": None,
+            "score": 0,
+            "blacklisted": True,
+            "price": candles[-1]["close"] if candles else None,
+            "adx": None, "rsi": None, "volume_ratio": None, "vwap": None,
+            "atr": None,
+            "conditions": empty_conditions,
+        }
     if len(candles) < need:
         return {
             "symbol": symbol,
@@ -785,6 +802,31 @@ class StrategyManager:
             tp_price = _smart_round(entry_price * (1 - self.config["target_pct"] / 100))
         return sl_price, tp_price
 
+    def _get_live_available_margin(self):
+        """Fetches real-time available margin balance from Delta Exchange via client."""
+        if not self.config.get("dry_run", True) and self.client and hasattr(self.client, "get_balances"):
+            try:
+                bal = self.client.get_balances(asset_id=3)  # 3 = USD asset_id on Delta
+                rows = bal.get("result", bal) if isinstance(bal, dict) else bal
+                if isinstance(rows, list) and rows:
+                    row = rows[0] if isinstance(rows[0], dict) else {}
+                elif isinstance(rows, dict):
+                    row = rows
+                else:
+                    return None
+                for key in ("available_balance", "available", "balance", "equity"):
+                    val = row.get(key)
+                    if val is not None:
+                        try:
+                            v = float(val)
+                            if v > 0:
+                                return v
+                        except (TypeError, ValueError):
+                            pass
+            except Exception as e:
+                logger.warning("Could not fetch live available margin: %s", e)
+        return None
+
     def _enter_trade(self, sig):
         symbol = sig["symbol"]
         direction = sig["direction"]
@@ -794,6 +836,11 @@ class StrategyManager:
         product_id = info["product_id"]
         contract_value = float(info.get("contract_value", 1.0) or 1.0)
         entry_price = sig["price"]
+
+        # Dynamic available margin sync right before trade placement
+        avail_bal = self._get_live_available_margin()
+        if avail_bal is not None and avail_bal > 0:
+            self.config["capital"] = avail_bal
 
         # for ATR-sizing we still risk-size off the fixed stop_loss_pct distance
         # as a conservative floor, since ATR distance varies trade to trade
@@ -817,9 +864,7 @@ class StrategyManager:
             if notional > max_notional:
                 qty = max(int(max_notional // notional_per_contract), 1)
 
-        # ADDED: also respect the EXCHANGE's actual per-product max leverage,
-        # not just the bot's own config cap -- this is what was causing the
-        # repeated "leverage_limit_exceeded" rejections in the trade log.
+        # respect the EXCHANGE's actual per-product max leverage
         product_max_lev = info.get("max_leverage")
         if product_max_lev and notional_per_contract > 0:
             max_notional_product = self.config["capital"] * product_max_lev
@@ -830,6 +875,31 @@ class StrategyManager:
                     "%s qty clamped to %s for exchange max_leverage=%s",
                     symbol, qty, product_max_lev,
                 )
+
+        # Live margin pre-flight check to prevent insufficient_margin API rejections
+        if avail_bal is not None and avail_bal > 0 and notional_per_contract > 0:
+            max_concurrent = max(self.config.get("max_concurrent_trades", 3), 1)
+            avail_margin_for_trade = avail_bal / max_concurrent
+            effective_lev = min(
+                self.config.get("max_leverage", 3),
+                product_max_lev or self.config.get("max_leverage", 3)
+            )
+            max_notional_margin = avail_margin_for_trade * effective_lev
+            max_qty_margin = int(max_notional_margin // notional_per_contract)
+            if max_qty_margin < 1:
+                logger.warning(
+                    "INSUFFICIENT MARGIN SKIPPED %s: contract notional %.2f exceeds max allowable margin notional %.2f (available balance: %.2f)",
+                    symbol, notional_per_contract, max_notional_margin, avail_bal
+                )
+                with self.lock:
+                    self.failed_symbols[symbol] = time.time()
+                self._log_trade("ENTRY_SKIPPED", symbol, entry_price, 0, sig, {
+                    "error": f"Insufficient available balance (avail={avail_bal:.2f})"
+                })
+                return
+            if qty > max_qty_margin:
+                logger.info("%s qty clamped from %d to %d based on available wallet balance %.2f", symbol, qty, max_qty_margin, avail_bal)
+                qty = max_qty_margin
 
         sl_price, tp_price = self._compute_sl_tp(direction, entry_price, sig.get("atr"))
 
