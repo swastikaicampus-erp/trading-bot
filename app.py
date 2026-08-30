@@ -235,25 +235,27 @@ strategy = StrategyManager(
 def _sync_capital_from_balance():
     """Best-effort: wallet available balance → strategy capital (risk sizing)."""
     try:
-        bal = client.get_balances(asset_id=3)  # 3 = USD asset_id on Delta
+        bal = client.get_balances()  # Fetch all asset balances
         rows = bal.get("result", bal) if isinstance(bal, dict) else bal
-        if isinstance(rows, list) and rows:
-            row = rows[0] if isinstance(rows[0], dict) else {}
-        elif isinstance(rows, dict):
-            row = rows
-        else:
-            return
-        for key in ("available_balance", "available", "balance", "equity"):
-            val = row.get(key)
-            if val is not None:
-                try:
-                    capital = float(val)
-                    if capital > 0:
-                        strategy.config["capital"] = capital
-                        print(f"[startup] strategy capital set from balance: {capital}")
-                        return
-                except (TypeError, ValueError):
-                    pass
+        if isinstance(rows, dict):
+            rows = [rows]
+        if isinstance(rows, list):
+            max_bal = 0.0
+            for row in rows:
+                if isinstance(row, dict):
+                    for key in ("available_balance", "available", "balance", "equity"):
+                        val = row.get(key)
+                        if val is not None:
+                            try:
+                                v = float(val)
+                                if v > max_bal:
+                                    max_bal = v
+                            except (TypeError, ValueError):
+                                pass
+            if max_bal > 0:
+                strategy.config["capital"] = max_bal
+                print(f"[startup] strategy capital set from balance: {max_bal}")
+                return
     except Exception as e:
         print(f"[startup] could not sync capital from balance: {e}")
 
@@ -370,7 +372,7 @@ def rate_limit_quota():
 @app.route("/balance", methods=["GET"])
 def get_balance():
     try:
-        balance = client.get_balances(asset_id=3)  # 3 = USD asset_id on Delta
+        balance = client.get_balances()  # Fetch all asset balances for dashboard/frontend
         return jsonify({"success": True, "data": balance})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

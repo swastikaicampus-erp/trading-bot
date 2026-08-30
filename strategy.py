@@ -109,7 +109,11 @@ DEFAULT_CONFIG = {
     "allow_short": False,
 
     # symbol blacklist -- toxic or ultra-illiquid altcoins to skip
-    "symbol_blacklist": ["AVAAIUSD", "LABUSD", "PUMPUSD", "BMTUSD", "BBUSD", "AKEUSD", "VELVETUSD", "HUSD", "AIOUSD", "SNDKBUSD"],
+    "symbol_blacklist": [
+        "AVAAIUSD", "LABUSD", "BEATUSD", "POLUSD", "ARCUSD", "BMTUSD", "BBUSD",
+        "RAREUSD", "ORDERUSD", "ETHFIUSD", "RAVEUSD", "BLESSUSD", "NEIROUSD", "MANAUSD",
+        "PUMPUSD", "AKEUSD", "VELVETUSD", "HUSD", "AIOUSD", "SNDKBUSD", "DRAMBUSD",
+    ],
 
     # minimum score threshold
     "min_score_threshold": 0.30,
@@ -481,8 +485,20 @@ def compute_diagnostics(symbol, candles, config):
 
     score = 0.0
     if curr_adx is not None and curr_rsi is not None:
-        adx_score = min(curr_adx / 50.0, 1.0)
-        vol_score = min(volume_ratio / 3.0, 1.0)
+        # ADX sweet spot: 18-35. Above 35 represents late trend / exhaustion risk.
+        if curr_adx < 18:
+            adx_score = curr_adx / 18.0
+        elif curr_adx <= 35:
+            adx_score = 1.0
+        else:
+            adx_score = max(1.0 - (curr_adx - 35) / 35.0, 0.2)
+
+        # Volume ratio sweet spot: 1.1x to 2.2x. Extreme volume (> 2.5x) is climax exhaustion.
+        if volume_ratio <= 2.2:
+            vol_score = min(volume_ratio / 1.5, 1.0)
+        else:
+            vol_score = max(1.0 - (volume_ratio - 2.2) / 3.0, 0.3)
+
         if direction == "short":
             rsi_mid = (config["rsi_short_floor"] + config["rsi_short_ceiling"]) / 2
             rsi_span = max(config["rsi_short_ceiling"] - rsi_mid, 1)
@@ -493,14 +509,14 @@ def compute_diagnostics(symbol, candles, config):
             rsi_mid, rsi_span = 50.0, 50.0
         rsi_score = 1.0 - min(abs(curr_rsi - rsi_mid) / rsi_span, 1.0)
 
-        # mild penalty if RSI already very extended (late entry risk)
+        # Penalty if RSI already overextended (late entry buying top / shorting bottom)
         extension_pen = 0.0
         if direction == "long" and curr_rsi is not None and curr_rsi > 65:
-            extension_pen = min((curr_rsi - 65) / 35.0, 0.25)
+            extension_pen = min((curr_rsi - 65) / 25.0, 0.35)
         elif direction == "short" and curr_rsi is not None and curr_rsi < 35:
-            extension_pen = min((35 - curr_rsi) / 35.0, 0.25)
+            extension_pen = min((35 - curr_rsi) / 25.0, 0.35)
 
-        raw = adx_score * 0.45 + vol_score * 0.30 + rsi_score * 0.25
+        raw = adx_score * 0.40 + vol_score * 0.30 + rsi_score * 0.30
         score = round(max(raw - extension_pen, 0.0), 4)
 
     return {
@@ -806,23 +822,25 @@ class StrategyManager:
         """Fetches real-time available margin balance from Delta Exchange via client."""
         if not self.config.get("dry_run", True) and self.client and hasattr(self.client, "get_balances"):
             try:
-                bal = self.client.get_balances(asset_id=3)  # 3 = USD asset_id on Delta
+                bal = self.client.get_balances()  # Fetch all asset balances
                 rows = bal.get("result", bal) if isinstance(bal, dict) else bal
-                if isinstance(rows, list) and rows:
-                    row = rows[0] if isinstance(rows[0], dict) else {}
-                elif isinstance(rows, dict):
-                    row = rows
-                else:
-                    return None
-                for key in ("available_balance", "available", "balance", "equity"):
-                    val = row.get(key)
-                    if val is not None:
-                        try:
-                            v = float(val)
-                            if v > 0:
-                                return v
-                        except (TypeError, ValueError):
-                            pass
+                if isinstance(rows, dict):
+                    rows = [rows]
+                if isinstance(rows, list):
+                    max_bal = 0.0
+                    for row in rows:
+                        if isinstance(row, dict):
+                            for key in ("available_balance", "available", "balance", "equity"):
+                                val = row.get(key)
+                                if val is not None:
+                                    try:
+                                        v = float(val)
+                                        if v > max_bal:
+                                            max_bal = v
+                                    except (TypeError, ValueError):
+                                        pass
+                    if max_bal > 0:
+                        return max_bal
             except Exception as e:
                 logger.warning("Could not fetch live available margin: %s", e)
         return None
