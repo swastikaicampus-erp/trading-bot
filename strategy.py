@@ -45,7 +45,7 @@ import json
 import logging
 import threading
 from math import log10, floor
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger("delta-strategy-engine")
 
@@ -144,6 +144,29 @@ DEFAULT_CONFIG = {
     "htf_ema_fast": 20,
     "htf_ema_slow": 50,
 
+    # 1. Bitcoin Flash Crash Filter
+    "enable_btc_crash_filter": True,
+    "btc_dump_threshold_pct": 1.0,
+    "btc_symbol": "BTCUSD",
+
+    # 2. Partial Take-Profit (50% exit at +1.5% profit)
+    "enable_partial_tp": True,
+    "partial_tp_trigger_pct": 1.5,
+    "partial_tp_ratio": 0.5,
+
+    # 3. VWAP Upper Band Overbought Filter (+1.5 StdDev)
+    "enable_vwap_band_filter": True,
+    "vwap_max_std_dev": 1.5,
+
+    # 4. High Volatility Session Window Filter (IST peak trading hours)
+    "enable_session_filter": True,
+    "session_start_hour_ist": 9,   # 9:00 AM IST
+    "session_end_hour_ist": 2,     # 2:00 AM IST (next day)
+
+    # 5. 24h/8h Funding Rate Filter
+    "enable_funding_filter": True,
+    "max_funding_rate_pct": 0.05,  # +0.05% max funding rate for long entries
+
     "dry_run_max_hold_sec": 3600,
 
     "dry_run": True,
@@ -167,6 +190,11 @@ EDITABLE_CONFIG_KEYS = [
     "enable_breakeven_sl", "breakeven_trigger_pct",
     "enable_trailing_sl", "trailing_distance_pct", "trailing_step_pct",
     "require_htf_trend", "htf_ema_fast", "htf_ema_slow",
+    "enable_btc_crash_filter", "btc_dump_threshold_pct", "btc_symbol",
+    "enable_partial_tp", "partial_tp_trigger_pct", "partial_tp_ratio",
+    "enable_vwap_band_filter", "vwap_max_std_dev",
+    "enable_session_filter", "session_start_hour_ist", "session_end_hour_ist",
+    "enable_funding_filter", "max_funding_rate_pct",
 ]
 
 
@@ -394,10 +422,10 @@ def resample_candles_1h(candles):
         hourly.append(cur_c)
     return hourly
 
-
-def _today_vwap(candles):
+def _today_vwap_with_bands(candles, max_std_dev=1.5):
     today = datetime.now(timezone.utc).date()
     pv, vol = 0.0, 0.0
+    day_candles = []
     for c in candles:
         t = c.get("time")
         try:
@@ -410,7 +438,22 @@ def _today_vwap(candles):
         v = c.get("volume") or 0
         pv += c["close"] * v
         vol += v
-    return (pv / vol) if vol > 0 else None
+        day_candles.append((c["close"], v))
+
+    if vol <= 0 or not day_candles:
+        return None, None, None
+
+    vwap = pv / vol
+    var_sum = sum(v * ((p - vwap) ** 2) for p, v in day_candles)
+    std_dev = (var_sum / vol) ** 0.5
+    upper_band = vwap + (max_std_dev * std_dev)
+    lower_band = vwap - (max_std_dev * std_dev)
+    return vwap, upper_band, lower_band
+
+
+def _today_vwap(candles):
+    vwap, _, _ = _today_vwap_with_bands(candles)
+    return vwap
 
 
 def compute_diagnostics(symbol, candles, config):
@@ -421,7 +464,7 @@ def compute_diagnostics(symbol, candles, config):
         "adx_ok": False, "adx_rising": False,
         "rsi_long_ok": False, "rsi_short_ok": False,
         "vwap_long_ok": False, "vwap_short_ok": False, "volume_ok": False,
-        "ema_sep_ok": False,
+        "ema_sep_ok": False, "vwap_band_ok": False, "funding_ok": False,
     }
     blacklist = config.get("symbol_blacklist") or []
     if symbol in blacklist:
@@ -508,9 +551,25 @@ def compute_diagnostics(symbol, candles, config):
         config["rsi_short_floor"] < curr_rsi <= config["rsi_short_ceiling"]
     )
 
-    vwap = _today_vwap(candles) if config["vwap_filter"] else None
-    vwap_long_ok = (not config["vwap_filter"]) or vwap is None or curr_price > vwap
-    vwap_short_ok = (not config["vwap_filter"]) or vwap is None or curr_price < vwap
+    vwap, vwap_upper, vwap_lower = _today_vwap_with_bands(
+        candles, config.get("vwap_max_std_dev", 1.5)
+    ) if (config.get("vwap_filter", True) or config.get("enable_vwap_band_filter", True)) else (None, None, None)
+
+    vwap_long_ok = (not config.get("vwap_filter", True)) or vwap is None or curr_price > vwap
+    vwap_short_ok = (not config.get("vwap_filter", True)) or vwap is None or curr_price < vwap
+
+    # 3. VWAP Upper Band Overbought Filter
+    vwap_band_ok = True
+    if config.get("enable_vwap_band_filter", True) and vwap_upper is not None:
+        vwap_band_ok = curr_price <= vwap_upper
+
+    # 5. 24h / 8h Funding Rate Filter
+    funding_ok = True
+    symbol_funding = config.get("_symbol_funding_rates", {}).get(symbol)
+    if config.get("enable_funding_filter", True) and symbol_funding is not None:
+        max_funding_pct = float(config.get("max_funding_rate_pct", 0.05) or 0.05)
+        if symbol_funding > (max_funding_pct / 100.0):
+            funding_ok = False
 
     lookback = config["volume_lookback"]
     recent_vols = [v for v in volumes[-(lookback + 1):-1] if v]
@@ -533,7 +592,7 @@ def compute_diagnostics(symbol, candles, config):
     long_qualifies = bool(
         config.get("allow_long", True)
         and fresh_cross_up and trend_ok and adx_rising_ok and ema_sep_ok
-        and rsi_long_ok and vwap_long_ok and volume_ok and htf_long_ok
+        and rsi_long_ok and vwap_long_ok and vwap_band_ok and volume_ok and htf_long_ok and funding_ok
     )
     short_qualifies = bool(
         config.get("allow_short", True)
@@ -607,6 +666,8 @@ def compute_diagnostics(symbol, candles, config):
             "vwap_short_ok": vwap_short_ok,
             "volume_ok": volume_ok,
             "ema_sep_ok": ema_sep_ok,
+            "vwap_band_ok": vwap_band_ok,
+            "funding_ok": funding_ok,
         },
         "qualifies": qualifies,
         "direction": direction,
@@ -637,6 +698,7 @@ class StrategyManager:
         self.trades_today = 0
         self.realized_pnl_today = 0.0
         self.circuit_broken = False
+        self.btc_crash_active = False
         self.day_marker = datetime.now(timezone.utc).date()
         self.last_scan = {}
         self.trade_log = []
@@ -768,12 +830,55 @@ class StrategyManager:
         if recovered:
             logger.info("Synced %d existing position(s) from exchange", recovered)
 
+    def _check_btc_flash_crash(self):
+        if not self.config.get("enable_btc_crash_filter", True):
+            self.btc_crash_active = False
+            return False
+
+        btc_sym = self.config.get("btc_symbol", "BTCUSD")
+        candles = self.feed.get_candles(btc_sym, limit=12)
+        if not candles or len(candles) < 3:
+            self.btc_crash_active = False
+            return False
+
+        curr_close = candles[-1]["close"]
+        lookback_high = max(c["high"] for c in candles[-4:])
+        thresh = float(self.config.get("btc_dump_threshold_pct", 1.0) or 1.0)
+        drop_pct = ((curr_close - lookback_high) / lookback_high) * 100.0
+
+        if drop_pct <= -abs(thresh):
+            if not getattr(self, "btc_crash_active", False):
+                logger.warning("🛑 BTC FLASH CRASH DETECTED: BTC dropped %.2f%%! Pausing Altcoin LONG entries.", drop_pct)
+            self.btc_crash_active = True
+            return True
+        else:
+            self.btc_crash_active = False
+            return False
+
+    def _is_within_trading_session(self):
+        if not self.config.get("enable_session_filter", True):
+            return True
+        try:
+            now_utc = datetime.now(timezone.utc)
+            now_ist = now_utc + timedelta(hours=5, minutes=30)
+            curr_hour = now_ist.hour
+            start_h = int(self.config.get("session_start_hour_ist", 9))
+            end_h = int(self.config.get("session_end_hour_ist", 2))
+
+            if start_h < end_h:
+                return start_h <= curr_hour < end_h
+            else:
+                return curr_hour >= start_h or curr_hour < end_h
+        except Exception:
+            return True
+
     # -- scanning ------------------------------------------------------
     def _scan_loop(self):
         while self.running:
             try:
                 self._roll_day_if_needed()
                 self._prune_failed_symbols()
+                self._check_btc_flash_crash()
                 self._scan_all_symbols()
 
                 with self.lock:
@@ -802,9 +907,15 @@ class StrategyManager:
                 self.last_scan[symbol] = diag
 
     def _maybe_enter_best_candidate(self):
+        # 4. High Volatility Session Window Check
+        if not self._is_within_trading_session():
+            return
+
         cooldown_sec = self.config.get("failed_retry_cooldown_sec", 300)
         now = time.time()
-        min_score = self.config.get("min_score_threshold", 0.0)   # ADDED
+        min_score = self.config.get("min_score_threshold", 0.0)
+        btc_crash = getattr(self, "btc_crash_active", False)
+
         with self.lock:
             open_symbols = set(self.open_trades.keys())
             cooling_down = {
@@ -812,13 +923,19 @@ class StrategyManager:
             }
             scan_snapshot = dict(self.last_scan)
 
-        candidates = [
-            diag for symbol, diag in scan_snapshot.items()
-            if diag.get("qualifies")
-            and diag.get("score", 0) >= min_score          # ADDED
-            and symbol not in open_symbols
-            and symbol not in cooling_down
-        ]
+        candidates = []
+        for symbol, diag in scan_snapshot.items():
+            if not diag.get("qualifies"):
+                continue
+            if diag.get("score", 0) < min_score:
+                continue
+            if symbol in open_symbols or symbol in cooling_down:
+                continue
+            # 1. BTC Flash Crash Protection: pause LONG entries when BTC dumps
+            if btc_crash and diag.get("direction") == "long":
+                continue
+            candidates.append(diag)
+
         if not candidates:
             return
 
@@ -1205,12 +1322,89 @@ class StrategyManager:
                 except Exception as e:
                     logger.warning("Could not update live trailing SL for %s: %s", symbol, e)
 
+    def _check_partial_tp(self, symbol):
+        if not self.config.get("enable_partial_tp", True):
+            return
+
+        with self.lock:
+            trade = self.open_trades.get(symbol)
+            if not trade or trade.get("partial_tp_done"):
+                return
+            trade_copy = dict(trade)
+
+        entry_price = trade_copy.get("entry_price")
+        direction = trade_copy.get("direction", "long")
+        qty = trade_copy.get("qty", 1)
+        if not entry_price or entry_price <= 0 or qty <= 1:
+            return
+
+        candles = self.feed.get_candles(symbol, limit=3)
+        if not candles:
+            return
+        curr_price = candles[-1]["close"]
+
+        trigger_pct = float(self.config.get("partial_tp_trigger_pct", 1.5) or 1.5)
+        ratio = float(self.config.get("partial_tp_ratio", 0.5) or 0.5)
+
+        triggered = False
+        if direction == "long" and curr_price >= entry_price * (1 + trigger_pct / 100.0):
+            triggered = True
+        elif direction == "short" and curr_price <= entry_price * (1 - trigger_pct / 100.0):
+            triggered = True
+
+        if triggered:
+            exit_qty = max(1, int(qty * ratio))
+            rem_qty = qty - exit_qty
+            be_sl = _smart_round(entry_price * 1.0005) if direction == "long" else _smart_round(entry_price * 0.9995)
+
+            logger.info(
+                "💰 PARTIAL TAKE-PROFIT TRIGGERED for %s [%s]: Exiting %d of %d contracts at %.6f (+%.2f%%). Setting BE SL=%.6f for remaining %d",
+                symbol, direction, exit_qty, qty, curr_price, trigger_pct, be_sl, rem_qty
+            )
+
+            pnl = self._pnl_for_trade({**trade_copy, "qty": exit_qty}, curr_price)
+
+            with self.lock:
+                if symbol in self.open_trades:
+                    self.open_trades[symbol]["qty"] = rem_qty
+                    self.open_trades[symbol]["sl_price"] = be_sl
+                    self.open_trades[symbol]["partial_tp_done"] = True
+                    self.open_trades[symbol]["breakeven_activated"] = True
+                    self.realized_pnl_today += pnl
+
+            self._log_trade(
+                "PARTIAL_TP", symbol, curr_price, exit_qty,
+                {"direction": direction, "score": trade_copy.get("score")},
+                {"note": f"Partial exit {exit_qty}/{qty} @ {curr_price:.6f}, SL moved to BE ({be_sl})"},
+                pnl=pnl
+            )
+
+            if not self.config.get("dry_run", True) and self.place_order_fn:
+                try:
+                    product_id = trade_copy.get("product_id")
+                    if product_id:
+                        exit_side = "sell" if direction == "long" else "buy"
+                        self.place_order_fn({
+                            "product_id": product_id,
+                            "size": exit_qty,
+                            "side": exit_side,
+                            "order_type": "market_order",
+                            "reduce_only": True
+                        })
+                        self.place_order_fn({
+                            "product_id": product_id,
+                            "bracket_stop_loss_price": str(be_sl),
+                        })
+                except Exception as e:
+                    logger.warning("Could not execute live partial TP for %s: %s", symbol, e)
+
     def _monitor_loop(self):
         while self.running:
             try:
                 with self.lock:
                     symbols = list(self.open_trades.keys())
                 for symbol in symbols:
+                    self._check_partial_tp(symbol)
                     self._check_breakeven_sl(symbol)
                     self._check_trailing_sl(symbol)
                     if self.config.get("dry_run", True):
@@ -1408,6 +1602,8 @@ class StrategyManager:
         return {
             "running": running,
             "circuit_broken": circuit_broken,
+            "btc_crash_active": getattr(self, "btc_crash_active", False),
+            "session_active": self._is_within_trading_session(),
             "config": self.config,
             "trades_today": trades_today,
             "max_trades_per_day": self.config["max_trades_per_day"],
