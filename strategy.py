@@ -891,7 +891,15 @@ class StrategyManager:
         """Fetches real-time available margin balance from Delta Exchange via client."""
         if not self.config.get("dry_run", True) and self.client and hasattr(self.client, "get_balances"):
             try:
-                bal = self.client.get_balances()  # Fetch all asset balances
+                try:
+                    bal = self.client.get_balances(1)
+                except (TypeError, Exception):
+                    try:
+                        bal = self.client.get_balances()
+                    except Exception:
+                        return None
+                if not bal:
+                    return None
                 rows = bal.get("result", bal) if isinstance(bal, dict) else bal
                 if isinstance(rows, dict):
                     rows = [rows]

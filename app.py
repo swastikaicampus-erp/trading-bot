@@ -235,7 +235,9 @@ strategy = StrategyManager(
 def _sync_capital_from_balance():
     """Best-effort: wallet available balance → strategy capital (risk sizing)."""
     try:
-        bal = client.get_balances()  # Fetch all asset balances
+        ok, status, bal = _signed_request("GET", "/v2/wallet/balances")
+        if not ok:
+            return
         rows = bal.get("result", bal) if isinstance(bal, dict) else bal
         if isinstance(rows, dict):
             rows = [rows]
@@ -372,8 +374,8 @@ def rate_limit_quota():
 @app.route("/balance", methods=["GET"])
 def get_balance():
     try:
-        balance = client.get_balances()  # Fetch all asset balances for dashboard/frontend
-        return jsonify({"success": True, "data": balance})
+        ok, status, data = _signed_request("GET", "/v2/wallet/balances")
+        return _delta_json_response(ok, status, data)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
