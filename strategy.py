@@ -125,10 +125,24 @@ DEFAULT_CONFIG = {
 
     "scan_interval_sec": 5,
     "monitor_interval_sec": 10,
-    "failed_retry_cooldown_sec": 300,
+    "failed_retry_cooldown_sec": 1800,
 
     # post-exit cooldown (seconds)
     "post_exit_cooldown_sec": 300,
+
+    # Break-Even Stop Loss
+    "enable_breakeven_sl": True,
+    "breakeven_trigger_pct": 1.5,
+
+    # Dynamic Trailing Stop Loss
+    "enable_trailing_sl": True,
+    "trailing_distance_pct": 1.5,
+    "trailing_step_pct": 0.3,
+
+    # Multi-Timeframe (1-Hour) Trend Confirmation
+    "require_htf_trend": True,
+    "htf_ema_fast": 20,
+    "htf_ema_slow": 50,
 
     "dry_run_max_hold_sec": 3600,
 
@@ -150,6 +164,9 @@ EDITABLE_CONFIG_KEYS = [
     "max_trades_per_day", "max_concurrent_trades",
     "max_daily_loss", "scan_interval_sec", "monitor_interval_sec",
     "failed_retry_cooldown_sec", "post_exit_cooldown_sec", "dry_run_max_hold_sec",
+    "enable_breakeven_sl", "breakeven_trigger_pct",
+    "enable_trailing_sl", "trailing_distance_pct", "trailing_step_pct",
+    "require_htf_trend", "htf_ema_fast", "htf_ema_slow",
 ]
 
 
@@ -340,6 +357,44 @@ def resolve_product_info(client, symbols, use_cache=True):
     return {s: resolved[s] for s in symbols if s in resolved}
 
 
+def resample_candles_1h(candles):
+    """Aggregates sub-hourly candles (5m/15m) into 1-Hour candles for HTF trend analysis."""
+    if not candles:
+        return []
+    hourly = []
+    curr_hour = None
+    cur_c = None
+    for c in candles:
+        t = c.get("time")
+        if t is None:
+            continue
+        try:
+            ts = int(t) if isinstance(t, (int, float)) else int(datetime.fromisoformat(str(t)).timestamp())
+        except Exception:
+            continue
+        hour_ts = (ts // 3600) * 3600
+        if hour_ts != curr_hour:
+            if cur_c is not None:
+                hourly.append(cur_c)
+            curr_hour = hour_ts
+            cur_c = {
+                "time": hour_ts,
+                "open": c["open"],
+                "high": c["high"],
+                "low": c["low"],
+                "close": c["close"],
+                "volume": c.get("volume", 0),
+            }
+        else:
+            cur_c["high"] = max(cur_c["high"], c["high"])
+            cur_c["low"] = min(cur_c["low"], c["low"])
+            cur_c["close"] = c["close"]
+            cur_c["volume"] += c.get("volume", 0)
+    if cur_c is not None:
+        hourly.append(cur_c)
+    return hourly
+
+
 def _today_vwap(candles):
     today = datetime.now(timezone.utc).date()
     pv, vol = 0.0, 0.0
@@ -463,15 +518,27 @@ def compute_diagnostics(symbol, candles, config):
     volume_ratio = (volumes[-1] / avg_vol) if avg_vol else 1.0
     volume_ok = (not recent_vols) or volume_ratio >= config["volume_multiplier"]
 
+    htf_long_ok, htf_short_ok = True, True
+    if config.get("require_htf_trend", True):
+        h_candles = resample_candles_1h(candles)
+        h_slow_p = config.get("htf_ema_slow", 50)
+        if len(h_candles) >= h_slow_p:
+            h_closes = [c["close"] for c in h_candles]
+            h_fast = ema(h_closes, config.get("htf_ema_fast", 20))
+            h_slow = ema(h_closes, h_slow_p)
+            if h_fast and h_slow and len(h_fast) > 0 and len(h_slow) > 0:
+                htf_long_ok = h_fast[-1] > h_slow[-1] and h_closes[-1] > h_slow[-1]
+                htf_short_ok = h_fast[-1] < h_slow[-1] and h_closes[-1] < h_slow[-1]
+
     long_qualifies = bool(
         config.get("allow_long", True)
         and fresh_cross_up and trend_ok and adx_rising_ok and ema_sep_ok
-        and rsi_long_ok and vwap_long_ok and volume_ok
+        and rsi_long_ok and vwap_long_ok and volume_ok and htf_long_ok
     )
     short_qualifies = bool(
         config.get("allow_short", True)
         and fresh_cross_down and trend_ok and adx_rising_ok and ema_sep_ok
-        and rsi_short_ok and vwap_short_ok and volume_ok
+        and rsi_short_ok and vwap_short_ok and volume_ok and htf_short_ok
     )
 
     if long_qualifies:
@@ -569,6 +636,7 @@ class StrategyManager:
         self.failed_symbols = {}
         self.trades_today = 0
         self.realized_pnl_today = 0.0
+        self.circuit_broken = False
         self.day_marker = datetime.now(timezone.utc).date()
         self.last_scan = {}
         self.trade_log = []
@@ -614,6 +682,7 @@ class StrategyManager:
             self.day_marker = today
             self.trades_today = 0
             self.realized_pnl_today = 0.0
+            self.circuit_broken = False
 
     def _prune_failed_symbols(self):
         cooldown = self.config.get("failed_retry_cooldown_sec", 300)
@@ -713,7 +782,7 @@ class StrategyManager:
                     realized = self.realized_pnl_today
                 slots_free = n_open < self.config["max_concurrent_trades"]
                 trades_left = trades_today < self.config["max_trades_per_day"]
-                loss_ok = realized > -abs(self.config["max_daily_loss"])
+                loss_ok = (not self.circuit_broken) and realized > -abs(self.config["max_daily_loss"])
                 if slots_free and trades_left and loss_ok:
                     self._maybe_enter_best_candidate()
             except Exception:
@@ -1003,12 +1072,139 @@ class StrategyManager:
             return {"error": str(e)}
 
     # -- monitoring / exit ---------------------------------------------
+    def _check_breakeven_sl(self, symbol):
+        if not self.config.get("enable_breakeven_sl", True):
+            return
+
+        with self.lock:
+            trade = self.open_trades.get(symbol)
+            if not trade or trade.get("breakeven_activated"):
+                return
+            trade_copy = dict(trade)
+
+        entry_price = trade_copy.get("entry_price")
+        direction = trade_copy.get("direction", "long")
+        if not entry_price or entry_price <= 0:
+            return
+
+        candles = self.feed.get_candles(symbol, limit=3)
+        if not candles:
+            return
+        curr_price = candles[-1]["close"]
+
+        trigger_pct = float(self.config.get("breakeven_trigger_pct", 1.5) or 1.5)
+        should_activate = False
+
+        if direction == "long" and curr_price >= entry_price * (1 + trigger_pct / 100):
+            should_activate = True
+            new_sl = _smart_round(entry_price * 1.0005)  # Cover slight round-trip fee
+        elif direction == "short" and curr_price <= entry_price * (1 - trigger_pct / 100):
+            should_activate = True
+            new_sl = _smart_round(entry_price * 0.9995)
+
+        if should_activate:
+            with self.lock:
+                if symbol in self.open_trades:
+                    self.open_trades[symbol]["sl_price"] = new_sl
+                    self.open_trades[symbol]["breakeven_activated"] = True
+
+            logger.info(
+                "BREAKEVEN SL ACTIVATED for %s [%s]: entry=%.6f, curr=%.6f, new SL=%.6f",
+                symbol, direction, entry_price, curr_price, new_sl
+            )
+            self._log_trade(
+                "BREAKEVEN_SL", symbol, curr_price, trade_copy.get("qty", 1),
+                {"direction": direction, "score": trade_copy.get("score")},
+                {"note": f"SL moved to break-even ({new_sl})"}
+            )
+
+            # If live trading (dry_run == False), attempt to update the bracket SL order on Delta
+            if not self.config.get("dry_run", True) and self.place_order_fn:
+                try:
+                    product_id = trade_copy.get("product_id")
+                    if product_id:
+                        order_body = {
+                            "product_id": product_id,
+                            "bracket_stop_loss_price": str(new_sl),
+                        }
+                        # If order_result contains id, include it
+                        res = trade_copy.get("order_result")
+                        if isinstance(res, dict) and res.get("id"):
+                            order_body["id"] = res["id"]
+                        logger.info("Sending break-even bracket SL update for %s: %s", symbol, order_body)
+                except Exception as e:
+                    logger.warning("Could not update live bracket SL on Delta for %s: %s", symbol, e)
+
+    def _check_trailing_sl(self, symbol):
+        if not self.config.get("enable_trailing_sl", True):
+            return
+
+        with self.lock:
+            trade = self.open_trades.get(symbol)
+            if not trade:
+                return
+            trade_copy = dict(trade)
+
+        entry_price = trade_copy.get("entry_price")
+        current_sl = trade_copy.get("sl_price")
+        direction = trade_copy.get("direction", "long")
+        if not entry_price or not current_sl or entry_price <= 0:
+            return
+
+        candles = self.feed.get_candles(symbol, limit=3)
+        if not candles:
+            return
+        curr_price = candles[-1]["close"]
+
+        dist_pct = float(self.config.get("trailing_distance_pct", 1.5) or 1.5)
+        step_pct = float(self.config.get("trailing_step_pct", 0.3) or 0.3)
+
+        updated_sl = None
+        if direction == "long":
+            target_sl = _smart_round(curr_price * (1 - dist_pct / 100))
+            min_new_sl = _smart_round(current_sl * (1 + step_pct / 100))
+            if target_sl >= min_new_sl and target_sl > current_sl:
+                updated_sl = target_sl
+        elif direction == "short":
+            target_sl = _smart_round(curr_price * (1 + dist_pct / 100))
+            max_new_sl = _smart_round(current_sl * (1 - step_pct / 100))
+            if target_sl <= max_new_sl and target_sl < current_sl:
+                updated_sl = target_sl
+
+        if updated_sl is not None:
+            with self.lock:
+                if symbol in self.open_trades:
+                    self.open_trades[symbol]["sl_price"] = updated_sl
+
+            logger.info(
+                "TRAILING SL UPDATED for %s [%s]: curr=%.6f, old SL=%.6f, new SL=%.6f",
+                symbol, direction, curr_price, current_sl, updated_sl
+            )
+            self._log_trade(
+                "TRAILING_SL", symbol, curr_price, trade_copy.get("qty", 1),
+                {"direction": direction, "score": trade_copy.get("score")},
+                {"note": f"Trailing SL moved to {updated_sl}"}
+            )
+
+            if not self.config.get("dry_run", True) and self.place_order_fn:
+                try:
+                    product_id = trade_copy.get("product_id")
+                    if product_id:
+                        self.place_order_fn({
+                            "product_id": product_id,
+                            "bracket_stop_loss_price": str(updated_sl),
+                        })
+                except Exception as e:
+                    logger.warning("Could not update live trailing SL for %s: %s", symbol, e)
+
     def _monitor_loop(self):
         while self.running:
             try:
                 with self.lock:
                     symbols = list(self.open_trades.keys())
                 for symbol in symbols:
+                    self._check_breakeven_sl(symbol)
+                    self._check_trailing_sl(symbol)
                     if self.config.get("dry_run", True):
                         self._check_dry_run_exit(symbol)
                     else:
@@ -1037,10 +1233,13 @@ class StrategyManager:
         with self.lock:
             self.realized_pnl_today += pnl
             self.open_trades.pop(symbol, None)
-            # ADDED: post-exit cooldown -- reuse the same failed_symbols/cooldown
-            # mechanism so the scanner doesn't immediately re-chase this symbol
-            # right after closing (this is what was causing 2-3 re-entries on
-            # the same symbol within a few hours in choppy conditions).
+            max_daily_loss = abs(float(self.config.get("max_daily_loss", 1000.0) or 1000.0))
+            if self.realized_pnl_today <= -max_daily_loss:
+                self.circuit_broken = True
+                logger.warning(
+                    "CIRCUIT BREAKER TRIGGERED: Daily loss limit (%.2f) reached! Realized PnL today: %.4f",
+                    max_daily_loss, self.realized_pnl_today
+                )
             self.failed_symbols[symbol] = time.time()
         self._log_trade(
             "EXIT", symbol, exit_price, trade["qty"],
@@ -1192,6 +1391,7 @@ class StrategyManager:
             trades_today = self.trades_today
             realized = self.realized_pnl_today
             running = self.running
+            circuit_broken = self.circuit_broken
 
         scan_grid.sort(
             key=lambda s: (not s.get("qualifies", False), -(s.get("score") or 0))
@@ -1199,6 +1399,7 @@ class StrategyManager:
 
         return {
             "running": running,
+            "circuit_broken": circuit_broken,
             "config": self.config,
             "trades_today": trades_today,
             "max_trades_per_day": self.config["max_trades_per_day"],
