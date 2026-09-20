@@ -10,9 +10,7 @@ REST_BASE = "https://api.india.delta.exchange"
 
 RESOLUTION = "1m"          # candle timeframe
 BACKFILL_MINUTES = 200     # how many past candles to preload per symbol
-SUBSCRIBE_CHUNK_SIZE = 50  # Delta ko ek hi message me 100+ symbols bhejna
-                            # risky hai (message size / server behaviour
-                            # undocumented hai) -- isliye chunks me bhejte hain.
+SUBSCRIBE_CHUNK_SIZE = 25  # Delta ko small chunks (25) me bhejte hain taaki WS disconnect na ho.
 
 
 def _safe_float(val, default=0.0):
@@ -301,9 +299,9 @@ class MarketDataFeed:
         print(f"[market_data] ws connected, subscribing {len(symbols)} symbols in chunks of {SUBSCRIBE_CHUNK_SIZE}")
         for chunk in _chunks(symbols, SUBSCRIBE_CHUNK_SIZE):
             self._subscribe(ws, "v2/ticker", chunk)
-            time.sleep(0.1)
+            time.sleep(0.35)
             self._subscribe(ws, f"candlestick_{RESOLUTION}", chunk)
-            time.sleep(0.1)
+            time.sleep(0.35)
 
     def _on_message(self, ws, message):
         # ADDED: wrap the entire handler -- a single malformed message

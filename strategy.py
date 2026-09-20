@@ -113,6 +113,7 @@ DEFAULT_CONFIG = {
         "AVAAIUSD", "LABUSD", "BEATUSD", "POLUSD", "ARCUSD", "BMTUSD", "BBUSD",
         "RAREUSD", "ORDERUSD", "ETHFIUSD", "RAVEUSD", "BLESSUSD", "NEIROUSD", "MANAUSD",
         "PUMPUSD", "AKEUSD", "VELVETUSD", "HUSD", "AIOUSD", "SNDKBUSD", "DRAMBUSD",
+        "AINUSD", "VVVUSD", "BUSD", "FFUSD", "EVAAUSD", "SKYAIUSD",
     ],
 
     # minimum score threshold
