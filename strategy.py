@@ -116,13 +116,13 @@ DEFAULT_CONFIG = {
         "AINUSD", "VVVUSD", "BUSD", "FFUSD", "EVAAUSD", "SKYAIUSD",
     ],
 
-    # minimum score threshold
-    "min_score_threshold": 0.30,
+    # minimum score threshold -- only take high-confidence A+ setups
+    "min_score_threshold": 0.45,
 
-    # portfolio-level limits
-    "max_trades_per_day": 10,
-    "max_concurrent_trades": 3,
-    "max_daily_loss": 1000,
+    # portfolio-level limits (optimized for small $12 account)
+    "max_trades_per_day": 8,
+    "max_concurrent_trades": 2,
+    "max_daily_loss": 5,
 
     "scan_interval_sec": 5,
     "monitor_interval_sec": 10,
