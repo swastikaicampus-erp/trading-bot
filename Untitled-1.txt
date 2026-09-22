@@ -1,0 +1,15 @@
+cd /var/www/delta-service
+nano check_pnl.py
+
+
+python3 check_pnl.py
+
+
+pm2 logs delta-service --lines 50
+
+
+cd /var/www/delta-service
+git pull origin main
+pm2 restart delta-service
+pm2 logs delta-service --lines 30
+

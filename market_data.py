@@ -29,24 +29,17 @@ def _safe_float(val, default=0.0):
         return default
 
 
-def discover_perpetual_futures_symbols(quote_assets=None):
+def discover_perpetual_futures_symbols(quote_assets={"USD"}, max_symbols=60):
     """
-    Delta ke /v2/products se saare LIVE perpetual futures symbols nikalta
-    hai (BTCUSD, ETHUSD, SOLUSD, aur baaki saare alt-coin perps).
-
-    quote_assets: optional filter, e.g. {"USD"} agar sirf USD-settled
-    perps chahiye (USDT-settled ya doosre quote assets exclude karne ke
-    liye). Default None = sabhi quote assets allowed.
-
-    Options, spreads, move contracts, futures (dated, non-perp), spot
-    -- ye sab explicitly exclude kiye jaate hain, sirf perpetual_futures
-    rehta hai kyunki ye hi actually leverage ke saath trade hote hain.
+    Delta ke /v2/products se LIVE perpetual futures symbols nikalta hai,
+    24h volume/turnover ke basis par sort karke Top `max_symbols` (default 60)
+    most liquid contracts return karta hai.
     """
     resp = requests.get(f"{REST_BASE}/v2/products", timeout=15)
     resp.raise_for_status()
     rows = resp.json().get("result", [])
 
-    symbols = []
+    candidates = []
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -63,9 +56,24 @@ def discover_perpetual_futures_symbols(quote_assets=None):
             quoting = (row.get("quoting_asset") or {}).get("symbol")
             if quoting not in quote_assets:
                 continue
-        symbols.append(symbol)
 
-    return sorted(set(symbols))
+        vol = 0.0
+        for vol_key in ("volume_24h", "turnover_24h", "volume", "24h_volume"):
+            v = row.get(vol_key)
+            if v is not None:
+                try:
+                    vol = float(v)
+                    break
+                except (TypeError, ValueError):
+                    pass
+        candidates.append((symbol, vol))
+
+    # Sort descending by 24h volume
+    candidates.sort(key=lambda x: -x[1])
+    if max_symbols and len(candidates) > max_symbols:
+        candidates = candidates[:max_symbols]
+
+    return sorted([c[0] for c in candidates])
 
 
 def _chunks(items, size):
@@ -297,11 +305,27 @@ class MarketDataFeed:
         symbols = self.get_symbols()   # always subscribes to the CURRENT list,
                                         # so reconnects pick up added/removed symbols
         print(f"[market_data] ws connected, subscribing {len(symbols)} symbols in chunks of {SUBSCRIBE_CHUNK_SIZE}")
-        for chunk in _chunks(symbols, SUBSCRIBE_CHUNK_SIZE):
-            self._subscribe(ws, "v2/ticker", chunk)
-            time.sleep(0.35)
-            self._subscribe(ws, f"candlestick_{RESOLUTION}", chunk)
-            time.sleep(0.35)
+        
+        def _do_subscribe():
+            for chunk in _chunks(symbols, SUBSCRIBE_CHUNK_SIZE):
+                with self._ws_lock:
+                    if self._ws is not ws or not self._running:
+                        break
+                    try:
+                        self._subscribe(ws, "v2/ticker", chunk)
+                    except Exception as e:
+                        print(f"[market_data] subscribe error (v2/ticker): {e}")
+                time.sleep(0.1)
+                with self._ws_lock:
+                    if self._ws is not ws or not self._running:
+                        break
+                    try:
+                        self._subscribe(ws, f"candlestick_{RESOLUTION}", chunk)
+                    except Exception as e:
+                        print(f"[market_data] subscribe error (candlestick): {e}")
+                time.sleep(0.1)
+
+        threading.Thread(target=_do_subscribe, daemon=True).start()
 
     def _on_message(self, ws, message):
         # ADDED: wrap the entire handler -- a single malformed message
@@ -328,12 +352,26 @@ class MarketDataFeed:
             with self._lock:
                 if symbol not in self.ticker:
                     return
+                funding_val = (
+                    msg.get("funding_rate")
+                    if msg.get("funding_rate") is not None
+                    else (
+                        msg.get("funding")
+                        if msg.get("funding") is not None
+                        else (
+                            msg.get("funding_rate_8h")
+                            if msg.get("funding_rate_8h") is not None
+                            else msg.get("current_funding_rate")
+                        )
+                    )
+                )
                 self.ticker[symbol] = {
                     "close": msg.get("close"),
                     "mark_price": msg.get("mark_price"),
                     "high": msg.get("high"),
                     "low": msg.get("low"),
                     "volume": msg.get("volume"),
+                    "funding_rate": _safe_float(funding_val),
                     "timestamp": msg.get("timestamp"),
                 }
 

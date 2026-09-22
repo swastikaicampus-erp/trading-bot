@@ -113,7 +113,10 @@ DEFAULT_CONFIG = {
         "AVAAIUSD", "LABUSD", "BEATUSD", "POLUSD", "ARCUSD", "BMTUSD", "BBUSD",
         "RAREUSD", "ORDERUSD", "ETHFIUSD", "RAVEUSD", "BLESSUSD", "NEIROUSD", "MANAUSD",
         "PUMPUSD", "AKEUSD", "VELVETUSD", "HUSD", "AIOUSD", "SNDKBUSD", "DRAMBUSD",
-        "AINUSD", "VVVUSD", "BUSD", "FFUSD", "EVAAUSD", "SKYAIUSD",
+        "AINUSD", "VVVUSD", "BUSD", "FFUSD", "EVAAUSD", "SKYAIUSD", "INJUSD",
+        "INTCBUSD", "HYPEUSD", "PENGUUSD", "ESPORTSUSD", "MUBARAKUSD", "TLMUSD",
+        "GALAUSD", "XANUSD", "DASHUSD", "LISTAUSD", "SUIUSD", "ENAUSD", "DYDXUSD",
+        "DOTUSD", "SOPHUSD", "HIVEUSD", "XRPUSD", "METAXUSD", "GOATUSD", "FILUSD",
     ],
 
     # minimum score threshold -- only take high-confidence A+ setups
@@ -465,7 +468,9 @@ def compute_diagnostics(symbol, candles, config):
         "adx_ok": False, "adx_rising": False,
         "rsi_long_ok": False, "rsi_short_ok": False,
         "vwap_long_ok": False, "vwap_short_ok": False, "volume_ok": False,
-        "ema_sep_ok": False, "vwap_band_ok": False, "funding_ok": False,
+        "ema_sep_ok": False, "vwap_band_long_ok": False, "vwap_band_short_ok": False,
+        "vwap_band_ok": False, "funding_long_ok": False, "funding_short_ok": False,
+        "funding_ok": False,
     }
     blacklist = config.get("symbol_blacklist") or []
     if symbol in blacklist:
@@ -559,18 +564,25 @@ def compute_diagnostics(symbol, candles, config):
     vwap_long_ok = (not config.get("vwap_filter", True)) or vwap is None or curr_price > vwap
     vwap_short_ok = (not config.get("vwap_filter", True)) or vwap is None or curr_price < vwap
 
-    # 3. VWAP Upper Band Overbought Filter
-    vwap_band_ok = True
-    if config.get("enable_vwap_band_filter", True) and vwap_upper is not None:
-        vwap_band_ok = curr_price <= vwap_upper
+    # 3. VWAP Upper/Lower Band Overbought/Oversold Filter
+    vwap_band_long_ok = True
+    vwap_band_short_ok = True
+    if config.get("enable_vwap_band_filter", True):
+        if vwap_upper is not None:
+            vwap_band_long_ok = curr_price <= vwap_upper
+        if vwap_lower is not None:
+            vwap_band_short_ok = curr_price >= vwap_lower
 
     # 5. 24h / 8h Funding Rate Filter
-    funding_ok = True
+    funding_long_ok = True
+    funding_short_ok = True
     symbol_funding = config.get("_symbol_funding_rates", {}).get(symbol)
     if config.get("enable_funding_filter", True) and symbol_funding is not None:
         max_funding_pct = float(config.get("max_funding_rate_pct", 0.05) or 0.05)
         if symbol_funding > (max_funding_pct / 100.0):
-            funding_ok = False
+            funding_long_ok = False
+        if symbol_funding < -(max_funding_pct / 100.0):
+            funding_short_ok = False
 
     lookback = config["volume_lookback"]
     recent_vols = [v for v in volumes[-(lookback + 1):-1] if v]
@@ -593,12 +605,12 @@ def compute_diagnostics(symbol, candles, config):
     long_qualifies = bool(
         config.get("allow_long", True)
         and fresh_cross_up and trend_ok and adx_rising_ok and ema_sep_ok
-        and rsi_long_ok and vwap_long_ok and vwap_band_ok and volume_ok and htf_long_ok and funding_ok
+        and rsi_long_ok and vwap_long_ok and vwap_band_long_ok and volume_ok and htf_long_ok and funding_long_ok
     )
     short_qualifies = bool(
         config.get("allow_short", True)
         and fresh_cross_down and trend_ok and adx_rising_ok and ema_sep_ok
-        and rsi_short_ok and vwap_short_ok and volume_ok and htf_short_ok
+        and rsi_short_ok and vwap_short_ok and vwap_band_short_ok and volume_ok and htf_short_ok and funding_short_ok
     )
 
     if long_qualifies:
@@ -667,8 +679,12 @@ def compute_diagnostics(symbol, candles, config):
             "vwap_short_ok": vwap_short_ok,
             "volume_ok": volume_ok,
             "ema_sep_ok": ema_sep_ok,
-            "vwap_band_ok": vwap_band_ok,
-            "funding_ok": funding_ok,
+            "vwap_band_long_ok": vwap_band_long_ok,
+            "vwap_band_short_ok": vwap_band_short_ok,
+            "vwap_band_ok": vwap_band_long_ok if direction == "long" else (vwap_band_short_ok if direction == "short" else vwap_band_long_ok),
+            "funding_long_ok": funding_long_ok,
+            "funding_short_ok": funding_short_ok,
+            "funding_ok": funding_long_ok if direction == "long" else (funding_short_ok if direction == "short" else funding_long_ok),
         },
         "qualifies": qualifies,
         "direction": direction,
@@ -896,10 +912,14 @@ class StrategyManager:
             time.sleep(self.config["scan_interval_sec"])
 
     def _scan_all_symbols(self):
+        rates = self.config.setdefault("_symbol_funding_rates", {})
         for symbol in list(self.symbols):
             info = self.product_info.get(symbol)
             if not info or not info.get("product_id"):
                 continue
+            ticker = self.feed.get_ticker(symbol)
+            if ticker and ticker.get("funding_rate") is not None:
+                rates[symbol] = ticker["funding_rate"]
             candles = self.feed.get_candles(symbol, limit=300)
             if not candles:
                 continue
@@ -1051,13 +1071,14 @@ class StrategyManager:
         entry_price = sig["price"]
 
         # Dynamic available margin sync right before trade placement
+        capital = float(self.config.get("capital", 50000))
         avail_bal = self._get_live_available_margin()
         if avail_bal is not None and avail_bal > 0:
-            self.config["capital"] = avail_bal
+            capital = avail_bal
 
         # for ATR-sizing we still risk-size off the fixed stop_loss_pct distance
         # as a conservative floor, since ATR distance varies trade to trade
-        risk_amount = self.config["capital"] * (self.config["risk_pct"] / 100)
+        risk_amount = capital * (self.config["risk_pct"] / 100)
         sl_move = entry_price * (self.config["stop_loss_pct"] / 100)
         loss_per_contract = sl_move * contract_value
         qty = max(int(risk_amount // loss_per_contract), 1) if loss_per_contract > 0 else 1
@@ -1071,7 +1092,7 @@ class StrategyManager:
         notional_per_contract = entry_price * contract_value
 
         # existing bot-level leverage cap
-        max_notional = self.config["capital"] * self.config.get("max_leverage", 3)
+        max_notional = capital * self.config.get("max_leverage", 3)
         if notional_per_contract > 0:
             notional = qty * notional_per_contract
             if notional > max_notional:
@@ -1080,7 +1101,7 @@ class StrategyManager:
         # respect the EXCHANGE's actual per-product max leverage
         product_max_lev = info.get("max_leverage")
         if product_max_lev and notional_per_contract > 0:
-            max_notional_product = self.config["capital"] * product_max_lev
+            max_notional_product = capital * product_max_lev
             notional = qty * notional_per_contract
             if notional > max_notional_product:
                 qty = max(int(max_notional_product // notional_per_contract), 1)
@@ -1258,6 +1279,7 @@ class StrategyManager:
                         if isinstance(res, dict) and res.get("id"):
                             order_body["id"] = res["id"]
                         logger.info("Sending break-even bracket SL update for %s: %s", symbol, order_body)
+                        self.place_order_fn(order_body)
                 except Exception as e:
                     logger.warning("Could not update live bracket SL on Delta for %s: %s", symbol, e)
 
@@ -1602,6 +1624,8 @@ class StrategyManager:
 
         return {
             "running": running,
+            "is_running": running,
+            "strategy_running": running,
             "circuit_broken": circuit_broken,
             "btc_crash_active": getattr(self, "btc_crash_active", False),
             "session_active": self._is_within_trading_session(),
@@ -1609,6 +1633,8 @@ class StrategyManager:
             "trades_today": trades_today,
             "max_trades_per_day": self.config["max_trades_per_day"],
             "open_trades": open_trades,
+            "open_positions": open_trades,
+            "active_trades_count": len(open_trades),
             "max_concurrent_trades": self.config["max_concurrent_trades"],
             "realized_pnl_today": round(realized, 4),
             "failed_symbols_cooldown": failed_symbols,

@@ -44,9 +44,8 @@ CORS(app, origins=os.getenv("ALLOWED_ORIGINS", "*").split(","))
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 WATCHLIST_FILE = "watchlist.json"
 
-# Agar sirf USD-settled perps chahiye to yahan {"USD"} set karo. None =
-# sabhi quote assets allowed (USD + USDT dono type ke perps aa jaayenge).
-PERP_QUOTE_ASSET_FILTER = None
+# Filter to USD-settled perpetual futures contracts for maximum liquidity and safety
+PERP_QUOTE_ASSET_FILTER = {"USD"}
 
 BASE_URL = os.getenv("DELTA_BASE_URL")
 API_KEY = os.getenv("DELTA_API_KEY")
@@ -59,29 +58,32 @@ client = DeltaRestClient(
 )
 
 
+MAX_WATCHLIST_CAP = 60
+
+
 def _load_or_discover_watchlist():
     """
-    Watchlist ab manually curate nahi karni -- startup par Delta ke saare
-    LIVE perpetual futures khud discover ho jaate hain (BTCUSD, ETHUSD,
-    SOLUSD + saare alt-coin perps). Agar watchlist.json already exist
-    karti hai aur usme symbols hain (pichli run se, ya manually kisi ko
-    exclude kiya gaya tha), wahi use hoti hai -- taaki restart par
-    tumhara manual watchlist/<symbol> DELETE wapas na aa jaaye.
+    Startup par Delta ke Top 60 most liquid USD perpetual futures discover
+    hote hain. Agar watchlist.json exist karti hai aur usme <= 60 symbols
+    hain (curated list), wahi use hoti hai. Agar stale watchlist.json mein
+    >60 symbols hain, to top 60 liquid perps re-discover ho jaate hain.
     """
     if os.path.exists(WATCHLIST_FILE):
         try:
             with open(WATCHLIST_FILE) as f:
                 data = json.load(f)
                 symbols = data.get("symbols") or []
-                if symbols:
+                if symbols and len(symbols) <= MAX_WATCHLIST_CAP:
                     print(f"[startup] loaded {len(symbols)} symbols from {WATCHLIST_FILE}")
                     return symbols
+                elif symbols:
+                    print(f"[startup] {WATCHLIST_FILE} has {len(symbols)} symbols (> {MAX_WATCHLIST_CAP} cap). Re-discovering top liquid perps...")
         except (OSError, json.JSONDecodeError):
             print(f"[startup] {WATCHLIST_FILE} unreadable, re-discovering from Delta")
 
     try:
-        symbols = discover_perpetual_futures_symbols(quote_assets=PERP_QUOTE_ASSET_FILTER)
-        print(f"[startup] discovered {len(symbols)} live perpetual futures from Delta")
+        symbols = discover_perpetual_futures_symbols(quote_assets=PERP_QUOTE_ASSET_FILTER, max_symbols=MAX_WATCHLIST_CAP)
+        print(f"[startup] discovered {len(symbols)} top liquid perpetual futures from Delta")
         return symbols
     except Exception as e:
         print(f"[startup] discovery failed ({e}), falling back to empty watchlist")
