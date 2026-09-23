@@ -125,7 +125,14 @@ DEFAULT_CONFIG = {
     # portfolio-level limits (optimized for small $12 account)
     "max_trades_per_day": 8,
     "max_concurrent_trades": 2,
+    # Absolute dollar loss circuit-breaker (legacy, for small accounts)
     "max_daily_loss": 5,
+    # Percentage-of-capital circuit-breaker (takes precedence when set > 0)
+    # e.g. 5.0 = stop trading after losing 5% of current capital today
+    # Set to 0 to disable and fall back to max_daily_loss (absolute $)
+    "max_daily_loss_pct": 5.0,
+    # Max hold time (seconds) for recovered positions with no SL/TP in live mode
+    "recovered_max_hold_sec": 3600,
 
     "scan_interval_sec": 5,
     "monitor_interval_sec": 10,
@@ -189,7 +196,8 @@ EDITABLE_CONFIG_KEYS = [
     "allow_long", "allow_short", "symbol_blacklist",
     "min_score_threshold",
     "max_trades_per_day", "max_concurrent_trades",
-    "max_daily_loss", "scan_interval_sec", "monitor_interval_sec",
+    "max_daily_loss", "max_daily_loss_pct", "recovered_max_hold_sec",
+    "scan_interval_sec", "monitor_interval_sec",
     "failed_retry_cooldown_sec", "post_exit_cooldown_sec", "dry_run_max_hold_sec",
     "enable_breakeven_sl", "breakeven_trigger_pct",
     "enable_trailing_sl", "trailing_distance_pct", "trailing_step_pct",
@@ -574,14 +582,20 @@ def compute_diagnostics(symbol, candles, config):
             vwap_band_short_ok = curr_price >= vwap_lower
 
     # 5. 24h / 8h Funding Rate Filter
+    # SCALE NOTE: Delta ticker sends funding_rate as a decimal fraction
+    # (e.g. 0.0005 = 0.05%), so we compare against max_funding_rate_pct / 100.0
     funding_long_ok = True
     funding_short_ok = True
     symbol_funding = config.get("_symbol_funding_rates", {}).get(symbol)
     if config.get("enable_funding_filter", True) and symbol_funding is not None:
         max_funding_pct = float(config.get("max_funding_rate_pct", 0.05) or 0.05)
-        if symbol_funding > (max_funding_pct / 100.0):
+        # max_funding_rate_pct is in % (e.g. 0.05 means 0.05%)
+        # symbol_funding is in decimal (e.g. 0.0005 means 0.05%)
+        # So threshold in decimal = max_funding_pct / 100.0
+        funding_threshold = max_funding_pct / 100.0
+        if symbol_funding > funding_threshold:
             funding_long_ok = False
-        if symbol_funding < -(max_funding_pct / 100.0):
+        if symbol_funding < -funding_threshold:
             funding_short_ok = False
 
     lookback = config["volume_lookback"]
@@ -853,19 +867,21 @@ class StrategyManager:
             return False
 
         btc_sym = self.config.get("btc_symbol", "BTCUSD")
-        candles = self.feed.get_candles(btc_sym, limit=12)
-        if not candles or len(candles) < 3:
+        # FIX: Increased from 12→30 candles, lookback high from 4→20 candles
+        # (4 candles = 4 min was too short to catch real market dumps)
+        candles = self.feed.get_candles(btc_sym, limit=30)
+        if not candles or len(candles) < 5:
             self.btc_crash_active = False
             return False
 
         curr_close = candles[-1]["close"]
-        lookback_high = max(c["high"] for c in candles[-4:])
+        lookback_high = max(c["high"] for c in candles[-20:])  # 20-minute high
         thresh = float(self.config.get("btc_dump_threshold_pct", 1.0) or 1.0)
         drop_pct = ((curr_close - lookback_high) / lookback_high) * 100.0
 
         if drop_pct <= -abs(thresh):
             if not getattr(self, "btc_crash_active", False):
-                logger.warning("🛑 BTC FLASH CRASH DETECTED: BTC dropped %.2f%%! Pausing Altcoin LONG entries.", drop_pct)
+                logger.warning("🛑 BTC FLASH CRASH DETECTED: BTC dropped %.2f%% in 20min! Pausing Altcoin LONG entries.", drop_pct)
             self.btc_crash_active = True
             return True
         else:
@@ -904,7 +920,21 @@ class StrategyManager:
                     realized = self.realized_pnl_today
                 slots_free = n_open < self.config["max_concurrent_trades"]
                 trades_left = trades_today < self.config["max_trades_per_day"]
-                loss_ok = (not self.circuit_broken) and realized > -abs(self.config["max_daily_loss"])
+                # FIX: max_daily_loss_pct (% of capital) takes precedence over
+                # max_daily_loss (absolute $) when set to a value > 0.
+                daily_loss_pct = float(self.config.get("max_daily_loss_pct", 0) or 0)
+                if daily_loss_pct > 0:
+                    capital = float(self.config.get("capital", 50000))
+                    loss_limit = -(capital * daily_loss_pct / 100.0)
+                else:
+                    loss_limit = -abs(self.config["max_daily_loss"])
+                loss_ok = (not self.circuit_broken) and realized > loss_limit
+                if not loss_ok and not self.circuit_broken:
+                    logger.warning(
+                        "🚨 CIRCUIT BREAKER: Daily loss limit hit (realized=%.4f, limit=%.4f). No new trades today.",
+                        realized, loss_limit,
+                    )
+                    self.circuit_broken = True
                 if slots_free and trades_left and loss_ok:
                     self._maybe_enter_best_candidate()
             except Exception:
@@ -1076,10 +1106,14 @@ class StrategyManager:
         if avail_bal is not None and avail_bal > 0:
             capital = avail_bal
 
-        # for ATR-sizing we still risk-size off the fixed stop_loss_pct distance
-        # as a conservative floor, since ATR distance varies trade to trade
+        # FIX: Compute SL/TP FIRST using actual ATR or fixed-% distance,
+        # then size risk off the REAL sl_move — not the fixed stop_loss_pct.
+        # Previously sizing always used fixed % even when ATR stops were active,
+        # causing inconsistent risk per trade.
+        sl_price, tp_price = self._compute_sl_tp(direction, entry_price, sig.get("atr"))
+        sl_move = abs(entry_price - sl_price)
+
         risk_amount = capital * (self.config["risk_pct"] / 100)
-        sl_move = entry_price * (self.config["stop_loss_pct"] / 100)
         loss_per_contract = sl_move * contract_value
         qty = max(int(risk_amount // loss_per_contract), 1) if loss_per_contract > 0 else 1
 
@@ -1135,8 +1169,6 @@ class StrategyManager:
                 logger.info("%s qty clamped from %d to %d based on available wallet balance %.2f", symbol, qty, max_qty_margin, avail_bal)
                 qty = max_qty_margin
 
-        sl_price, tp_price = self._compute_sl_tp(direction, entry_price, sig.get("atr"))
-
         order_result = self._place_bracket_entry(product_id, qty, side, sl_price, tp_price)
 
         if isinstance(order_result, dict) and (
@@ -1160,6 +1192,7 @@ class StrategyManager:
                     fill, entry_price, symbol,
                 )
                 entry_price = fill
+                # Recompute with fill price (sl_price was initially computed from signal price)
                 sl_price, tp_price = self._compute_sl_tp(direction, entry_price, sig.get("atr"))
 
         with self.lock:
@@ -1458,12 +1491,21 @@ class StrategyManager:
         with self.lock:
             self.realized_pnl_today += pnl
             self.open_trades.pop(symbol, None)
-            max_daily_loss = abs(float(self.config.get("max_daily_loss", 1000.0) or 1000.0))
-            if self.realized_pnl_today <= -max_daily_loss:
+            # FIX: Use same loss-limit logic as _scan_loop — max_daily_loss_pct
+            # (% of capital) takes precedence over absolute max_daily_loss.
+            # Previously this used only the absolute $, causing inconsistency
+            # when max_daily_loss_pct was set.
+            daily_loss_pct = float(self.config.get("max_daily_loss_pct", 0) or 0)
+            if daily_loss_pct > 0:
+                capital = float(self.config.get("capital", 50000))
+                loss_limit = -(capital * daily_loss_pct / 100.0)
+            else:
+                loss_limit = -abs(float(self.config.get("max_daily_loss", 1000.0) or 1000.0))
+            if self.realized_pnl_today <= loss_limit:
                 self.circuit_broken = True
                 logger.warning(
-                    "CIRCUIT BREAKER TRIGGERED: Daily loss limit (%.2f) reached! Realized PnL today: %.4f",
-                    max_daily_loss, self.realized_pnl_today
+                    "CIRCUIT BREAKER TRIGGERED: Daily loss limit (%.4f) reached! Realized PnL today: %.4f",
+                    loss_limit, self.realized_pnl_today
                 )
             self.failed_symbols[symbol] = time.time()
         self._log_trade(
@@ -1519,6 +1561,56 @@ class StrategyManager:
             if not trade:
                 return
             trade = dict(trade)
+
+        # FIX: Recovered positions have no SL/TP (exchange bracket unknown).
+        # Force-close them after recovered_max_hold_sec to avoid hanging forever.
+        # In live mode: send a real reduce-only market order to actually close
+        # the position on the exchange before logging the internal close.
+        if trade.get("recovered"):
+            max_hold = self.config.get("recovered_max_hold_sec", 3600)
+            entry_ts = trade.get("entry_ts") or 0
+            if max_hold and entry_ts and (time.time() - entry_ts) >= max_hold:
+                candles = self.feed.get_candles(symbol, limit=3)
+                exit_price = candles[-1]["close"] if candles else trade["entry_price"]
+                logger.warning(
+                    "RECOVERED position %s hit max hold (%ds) with no bracket — forcing close at %.6f",
+                    symbol, max_hold, exit_price,
+                )
+                # FIX: In live mode, send reduce-only market order to actually
+                # close the position on the exchange.
+                if not self.config.get("dry_run", True) and self.place_order_fn is not None:
+                    close_side = "sell" if trade.get("direction") == "long" else "buy"
+                    close_body = {
+                        "product_id": trade["product_id"],
+                        "size": max(abs(int(trade.get("qty", 1))), 1),
+                        "side": close_side,
+                        "order_type": "market_order",
+                        "reduce_only": True,
+                    }
+                    try:
+                        close_result = self.place_order_fn(close_body)
+                        if isinstance(close_result, dict) and close_result.get("error"):
+                            logger.error(
+                                "RECOVERED force-close order FAILED for %s: %s — position still open on exchange!",
+                                symbol, close_result["error"],
+                            )
+                            return  # don't remove from internal state if order failed
+                        logger.info("RECOVERED force-close order placed for %s: %s", symbol, close_result)
+                        # Use actual fill price if available
+                        fill = close_result.get("average_fill_price") if isinstance(close_result, dict) else None
+                        if fill:
+                            try:
+                                exit_price = float(fill)
+                            except (TypeError, ValueError):
+                                pass
+                    except Exception as e:
+                        logger.error(
+                            "RECOVERED force-close order EXCEPTION for %s: %s — position still open on exchange!",
+                            symbol, e,
+                        )
+                        return
+                self._close_trade(symbol, trade, exit_price, "recovered max_hold")
+                return
 
         try:
             position = self.client.get_position(trade["product_id"])

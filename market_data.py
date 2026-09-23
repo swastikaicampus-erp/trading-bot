@@ -1,5 +1,6 @@
 import json
 import time
+import socket
 import threading
 import requests
 # pyrefly: ignore [missing-import]
@@ -11,6 +12,19 @@ REST_BASE = "https://api.india.delta.exchange"
 RESOLUTION = "1m"          # candle timeframe
 BACKFILL_MINUTES = 200     # how many past candles to preload per symbol
 SUBSCRIBE_CHUNK_SIZE = 25  # Delta ko small chunks (25) me bhejte hain taaki WS disconnect na ho.
+
+# ---------------------------------------------------------------------------
+# NETWORK: Force IPv4 for all outbound connections (REST + WebSocket).
+# Delta India servers can be unstable on IPv6 paths from VPS environments,
+# leading to repeated ping/pong timeouts and WS reconnect loops.
+# ---------------------------------------------------------------------------
+_original_getaddrinfo = socket.getaddrinfo
+
+def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    return _original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+
+socket.getaddrinfo = _ipv4_only_getaddrinfo   # monkey-patch: affects ALL sockets
+websocket.setdefaulttimeout(30)               # hard 30s socket read timeout
 
 
 def _safe_float(val, default=0.0):
@@ -105,6 +119,7 @@ class MarketDataFeed:
         self._ws = None
         self._ws_lock = threading.Lock()   # guards send() calls on self._ws
         self._running = False
+        self._connect_count = 0             # FIX: track reconnections for partial re-backfill
 
     # ---------- public read API ----------
 
@@ -274,7 +289,12 @@ class MarketDataFeed:
                 )
                 with self._ws_lock:
                     self._ws = ws
-                ws.run_forever(ping_interval=25, ping_timeout=10)
+                    self._connect_count += 1  # FIX: increment before on_open fires
+                # ping_interval=20: send WS ping every 20s (was 25)
+                # ping_timeout=15:  allow 15s for pong reply (was 10)
+                # Looser timeout prevents false "ping/pong timed out" disconnects
+                # on VPS with higher latency to Delta India servers.
+                ws.run_forever(ping_interval=20, ping_timeout=15)
             except Exception as e:
                 print(f"[market_data] ws crashed: {e}")
             with self._ws_lock:
@@ -302,10 +322,64 @@ class MarketDataFeed:
         ws.send(json.dumps(payload))
 
     def _on_open(self, ws):
-        symbols = self.get_symbols()   # always subscribes to the CURRENT list,
-                                        # so reconnects pick up added/removed symbols
-        print(f"[market_data] ws connected, subscribing {len(symbols)} symbols in chunks of {SUBSCRIBE_CHUNK_SIZE}")
+        symbols = self.get_symbols()   # always subscribes to the CURRENT list
+        connect_num = self._connect_count  # snapshot under ws_lock already incremented
+        print(f"[market_data] ws connected (#{connect_num}), subscribing {len(symbols)} symbols in chunks of {SUBSCRIBE_CHUNK_SIZE}")
         
+        # Enable heartbeat on Delta WS connection
+        try:
+            ws.send(json.dumps({"type": "enable_heartbeat"}))
+        except Exception as e:
+            print(f"[market_data] failed to enable heartbeat: {e}")
+
+        # FIX: On reconnect (connect_num > 1), do a light 40-candle re-backfill
+        # in the background so indicators don't use stale/gapped candle data.
+        # First connect already does full 200-candle backfill via start().
+        if connect_num > 1:
+            def _reconnect_backfill():
+                syms = self.get_symbols()
+                print(f"[market_data] reconnect backfill: refreshing last 40 candles for {len(syms)} symbols")
+                end = int(time.time())
+                start = end - 40 * 60  # last 40 minutes
+                for symbol in syms:
+                    try:
+                        import requests as _req
+                        r = _req.get(
+                            f"{REST_BASE}/v2/history/candles",
+                            params={"symbol": symbol, "resolution": RESOLUTION, "start": start, "end": end},
+                            timeout=8,
+                        )
+                        r.raise_for_status()
+                        result = r.json().get("result", [])
+                        new_candles = sorted(
+                            [
+                                {
+                                    "time": c["time"],
+                                    "open": _safe_float(c.get("open")),
+                                    "high": _safe_float(c.get("high")),
+                                    "low": _safe_float(c.get("low")),
+                                    "close": _safe_float(c.get("close")),
+                                    "volume": _safe_float(c.get("volume")),
+                                }
+                                for c in result
+                                if c.get("time") is not None
+                            ],
+                            key=lambda c: c["time"],
+                        )
+                        if new_candles:
+                            with self._lock:
+                                if symbol in self.candles:
+                                    existing = self.candles[symbol]
+                                    # Merge: keep old candles before the new window, append new ones
+                                    cutoff = new_candles[0]["time"]
+                                    merged = [c for c in existing if c["time"] < cutoff] + new_candles
+                                    if len(merged) > 1000:
+                                        merged = merged[-1000:]
+                                    self.candles[symbol] = merged
+                    except Exception as e:
+                        print(f"[market_data] reconnect backfill failed for {symbol}: {e}")
+            threading.Thread(target=_reconnect_backfill, daemon=True).start()
+
         def _do_subscribe():
             for chunk in _chunks(symbols, SUBSCRIBE_CHUNK_SIZE):
                 with self._ws_lock:
@@ -328,22 +402,29 @@ class MarketDataFeed:
         threading.Thread(target=_do_subscribe, daemon=True).start()
 
     def _on_message(self, ws, message):
-        # ADDED: wrap the entire handler -- a single malformed message
-        # (e.g. a candle field sent as explicit null) must never be able
-        # to propagate an unhandled exception out of this callback. That
-        # was the actual trigger for the crash -> reconnect -> crash loop.
         try:
-            self._handle_message(message)
+            self._handle_message(ws, message)
         except Exception as e:
             print(f"[market_data] on_message error (ignored, feed continues): {e}")
 
-    def _handle_message(self, message):
+    def _handle_message(self, ws, message):
         try:
             msg = json.loads(message)
         except Exception:
             return
 
         msg_type = msg.get("type", "")
+        
+        # Handle heartbeat & ping/pong app-level messages
+        if msg_type == "ping":
+            try:
+                ws.send(json.dumps({"type": "pong"}))
+            except Exception:
+                pass
+            return
+        elif msg_type in ("heartbeat", "pong", "enable_heartbeat", "subscriptions"):
+            return
+
         symbol = msg.get("symbol")
         if not symbol or symbol not in self.candles:
             return
