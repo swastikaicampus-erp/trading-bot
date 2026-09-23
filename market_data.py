@@ -124,6 +124,9 @@ class MarketDataFeed:
 
     # ---------- public read API ----------
 
+    # ---------- public read API ----------
+
+
     def get_candles(self, symbol, limit=None):
         with self._lock:
             data = list(self.candles.get(symbol, []))
