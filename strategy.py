@@ -454,7 +454,7 @@ def _today_vwap_with_bands(candles, max_std_dev=1.5):
 
     if vol <= 0 or not day_candles:
         return None, None, None
-# hsdjhjdhashaj
+
     vwap = pv / vol
     var_sum = sum(v * ((p - vwap) ** 2) for p, v in day_candles)
     std_dev = (var_sum / vol) ** 0.5
