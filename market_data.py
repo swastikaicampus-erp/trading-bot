@@ -119,7 +119,8 @@ class MarketDataFeed:
         self._ws = None
         self._ws_lock = threading.Lock()   # guards send() calls on self._ws
         self._running = False
-        self._connect_count = 0             # FIX: track reconnections for partial re-backfill
+        self._connect_count = 0             # track reconnections for partial re-backfill
+        self._backfill_in_progress = threading.Event()  # guard against overlapping reconnect backfills
 
     # ---------- public read API ----------
 
@@ -332,52 +333,75 @@ class MarketDataFeed:
         except Exception as e:
             print(f"[market_data] failed to enable heartbeat: {e}")
 
-        # FIX: On reconnect (connect_num > 1), do a light 40-candle re-backfill
+        # On reconnect (connect_num > 1), do a light 40-candle re-backfill
         # in the background so indicators don't use stale/gapped candle data.
         # First connect already does full 200-candle backfill via start().
         if connect_num > 1:
             def _reconnect_backfill():
-                syms = self.get_symbols()
-                print(f"[market_data] reconnect backfill: refreshing last 40 candles for {len(syms)} symbols")
-                end = int(time.time())
-                start = end - 40 * 60  # last 40 minutes
-                for symbol in syms:
-                    try:
-                        import requests as _req
-                        r = _req.get(
-                            f"{REST_BASE}/v2/history/candles",
-                            params={"symbol": symbol, "resolution": RESOLUTION, "start": start, "end": end},
-                            timeout=8,
-                        )
-                        r.raise_for_status()
-                        result = r.json().get("result", [])
-                        new_candles = sorted(
-                            [
-                                {
-                                    "time": c["time"],
-                                    "open": _safe_float(c.get("open")),
-                                    "high": _safe_float(c.get("high")),
-                                    "low": _safe_float(c.get("low")),
-                                    "close": _safe_float(c.get("close")),
-                                    "volume": _safe_float(c.get("volume")),
-                                }
-                                for c in result
-                                if c.get("time") is not None
-                            ],
-                            key=lambda c: c["time"],
-                        )
-                        if new_candles:
-                            with self._lock:
-                                if symbol in self.candles:
-                                    existing = self.candles[symbol]
-                                    # Merge: keep old candles before the new window, append new ones
-                                    cutoff = new_candles[0]["time"]
-                                    merged = [c for c in existing if c["time"] < cutoff] + new_candles
-                                    if len(merged) > 1000:
-                                        merged = merged[-1000:]
-                                    self.candles[symbol] = merged
-                    except Exception as e:
-                        print(f"[market_data] reconnect backfill failed for {symbol}: {e}")
+                # FIX 1: Guard against overlapping backfill threads.
+                # If a backfill is already running (double-reconnect burst),
+                # skip silently rather than hammering Delta REST twice.
+                if self._backfill_in_progress.is_set():
+                    print("[market_data] reconnect backfill skipped (already in progress)")
+                    return
+                self._backfill_in_progress.set()
+                try:
+                    syms = self.get_symbols()
+                    print(f"[market_data] reconnect backfill: refreshing last 40 candles for {len(syms)} symbols (parallel)")
+                    end = int(time.time())
+                    start_ts = end - 40 * 60  # last 40 minutes
+
+                    def _refill_one(symbol):
+                        try:
+                            r = requests.get(
+                                f"{REST_BASE}/v2/history/candles",
+                                params={"symbol": symbol, "resolution": RESOLUTION, "start": start_ts, "end": end},
+                                timeout=8,
+                            )
+                            r.raise_for_status()
+                            result = r.json().get("result", [])
+                            new_candles = sorted(
+                                [
+                                    {
+                                        "time": c["time"],
+                                        "open": _safe_float(c.get("open")),
+                                        "high": _safe_float(c.get("high")),
+                                        "low": _safe_float(c.get("low")),
+                                        "close": _safe_float(c.get("close")),
+                                        "volume": _safe_float(c.get("volume")),
+                                    }
+                                    for c in result
+                                    if c.get("time") is not None
+                                ],
+                                key=lambda c: c["time"],
+                            )
+                            if new_candles:
+                                with self._lock:
+                                    if symbol in self.candles:
+                                        existing = self.candles[symbol]
+                                        # Merge: keep old candles before the new window
+                                        cutoff = new_candles[0]["time"]
+                                        merged = [c for c in existing if c["time"] < cutoff] + new_candles
+                                        if len(merged) > 1000:
+                                            merged = merged[-1000:]
+                                        self.candles[symbol] = merged
+                        except Exception as e:
+                            print(f"[market_data] reconnect backfill failed for {symbol}: {e}")
+
+                    # FIX 2: Same chunked-parallel pattern as startup backfill()
+                    # 10 symbols run in parallel per chunk → ~6x faster than sequential
+                    max_parallel = 10
+                    for chunk in _chunks(syms, max_parallel):
+                        chunk_threads = [threading.Thread(target=_refill_one, args=(s,), daemon=True) for s in chunk]
+                        for t in chunk_threads:
+                            t.start()
+                        for t in chunk_threads:
+                            t.join()
+
+                    print(f"[market_data] reconnect backfill complete for {len(syms)} symbols")
+                finally:
+                    self._backfill_in_progress.clear()  # always release, even on exception
+
             threading.Thread(target=_reconnect_backfill, daemon=True).start()
 
         def _do_subscribe():
