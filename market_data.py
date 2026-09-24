@@ -24,7 +24,7 @@ def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
     return _original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
 
 socket.getaddrinfo = _ipv4_only_getaddrinfo   # monkey-patch: affects ALL sockets
-websocket.setdefaulttimeout(30)               # hard 30s socket read timeout
+websocket.setdefaulttimeout(45)               # hard 45s socket read timeout (was 30, increased for VPS latency)
 
 
 def _safe_float(val, default=0.0):
@@ -291,18 +291,20 @@ class MarketDataFeed:
                 with self._ws_lock:
                     self._ws = ws
                     self._connect_count += 1  # FIX: increment before on_open fires
-                # ping_interval=20: send WS ping every 20s (was 25)
-                # ping_timeout=15:  allow 15s for pong reply (was 10)
-                # Looser timeout prevents false "ping/pong timed out" disconnects
-                # on VPS with higher latency to Delta India servers.
-                ws.run_forever(ping_interval=20, ping_timeout=15)
+                # ping_interval=30: send WS ping every 30s (was 20).
+                # ping_timeout=20:  allow 20s for pong reply (was 15).
+                # Delta India servers have variable latency from VPS environments.
+                # Aggressive pings (20s/15s) caused frequent false "ping/pong timed out"
+                # disconnects when the server was slow but not actually dead.
+                # 30s/20s gives enough breathing room without losing liveness detection.
+                ws.run_forever(ping_interval=30, ping_timeout=20)
             except Exception as e:
                 print(f"[market_data] ws crashed: {e}")
             with self._ws_lock:
                 self._ws = None
             if self._running:
-                print("[market_data] reconnecting in 3s...")
-                time.sleep(3)
+                print("[market_data] reconnecting in 5s...")
+                time.sleep(5)  # was 3s; increased to 5s to avoid rapid reconnect storms
 
     def _subscribe(self, ws, channel, symbols):
         if not symbols:
