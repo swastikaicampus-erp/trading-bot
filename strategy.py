@@ -19,19 +19,13 @@ Sabse zyada SCORE wale qualifying symbol pe trade (min_score_threshold ke upar).
 max_trades_per_day GLOBAL, max_concurrent_trades hard cap.
 Bracket SL+TP entry ke saath (ATR-based ya fixed %, config se).
 
-IMPROVEMENTS (this version, 2026-08-03):
-  - CHANGED: tighter RSI band (45-65 long / 35-55 short), ADX 30, min_ema_sep 0.15
-  - CHANGED: stop_loss_pct 1.5 / target_pct 3.0 as fixed-% fallback
-  - ADDED: ATR-based SL/TP (use_atr_stops) -- per-symbol volatility instead of one fixed %
-  - ADDED: 2-candle confirmation on EMA cross (avoid single-candle whipsaw fakeouts)
-  - ADDED: post-exit cooldown -- symbol won't be re-entered immediately after a close
-  - ADDED: min_score_threshold -- weak candidates skipped even if "best available"
-  - ADDED: leverage-aware qty sizing -- respects each product's actual max_leverage
-           from the exchange, not just the bot's own config cap (fixes repeated
-           leverage_limit_exceeded rejections)
-  - (carried over) Realistic RR defaults, round-trip fee deduction, contract_value-aware
-    sizing + PnL, fill-price SL/TP recalc, race-safe copies, startup position recovery,
-    dry_run simulated SL/TP + max-hold
+IMPROVEMENTS (this version, 2026-09-29):
+  - UPDATED: RSI band (40-75 long / 25-60 short), ADX 20, min_ema_sep 0.02
+  - UPDATED: stop_loss_pct 1.2 / target_pct 3.6 (ATR multipliers 1.2 SL / 3.6 TP for 3:1 RR ratio)
+  - ADDED: Batch single-call position recovery (/v2/positions/margined) at startup
+  - ADDED: Live bracket order update endpoint routing (PUT /v2/orders/bracket) with order_id
+  - ADDED: Exact execution fill price extraction (/v2/fills) for realized PnL and circuit breaker accuracy
+  - ADDED: Atomic live reduce-only order execution before internal state mutation on partial TP
 
 SAFETY
   - dry_run True by default
@@ -66,9 +60,9 @@ DEFAULT_CONFIG = {
     "rsi_short_floor": 25,
     "rsi_short_ceiling": 60,
 
-    # trend filter (lowered ADX threshold from 30 -> 18 to capture standard crypto trends)
+    # trend filter (ADX threshold 20 to ensure solid trend strength)
     "adx_period": 14,
-    "adx_threshold": 18,
+    "adx_threshold": 20,
     "require_adx_rising": False,
 
     # microscopic EMA cross filter
@@ -92,14 +86,14 @@ DEFAULT_CONFIG = {
 
     # --- stop / target ---------------------------------------------------
     # fixed-% fallback (used when use_atr_stops is False or ATR unavailable)
-    "stop_loss_pct": 1.5,
-    "target_pct": 3.0,
+    "stop_loss_pct": 1.2,
+    "target_pct": 3.6,
 
     # ATR-based stops -- per-symbol volatility instead of fixed %
     "use_atr_stops": True,
     "atr_period": 14,
-    "atr_sl_mult": 1.5,
-    "atr_tp_mult": 3.0,
+    "atr_sl_mult": 1.2,
+    "atr_tp_mult": 3.6,
 
     # fees (Delta India taker ~0.05% each side -> ~0.10% round trip)
     "fee_rate_round_trip": 0.0010,
@@ -108,19 +102,22 @@ DEFAULT_CONFIG = {
     "allow_long": True,
     "allow_short": False,
 
-    # symbol blacklist -- toxic or ultra-illiquid altcoins to skip
+    # symbol blacklist -- toxic or underperforming altcoins to skip
     "symbol_blacklist": [
-        "AVAAIUSD", "LABUSD", "BEATUSD", "POLUSD", "ARCUSD", "BMTUSD", "BBUSD",
-        "RAREUSD", "ORDERUSD", "ETHFIUSD", "RAVEUSD", "BLESSUSD", "NEIROUSD", "MANAUSD",
-        "PUMPUSD", "AKEUSD", "VELVETUSD", "HUSD", "AIOUSD", "SNDKBUSD", "DRAMBUSD",
-        "AINUSD", "VVVUSD", "BUSD", "FFUSD", "EVAAUSD", "SKYAIUSD", "INJUSD",
-        "INTCBUSD", "HYPEUSD", "PENGUUSD", "ESPORTSUSD", "MUBARAKUSD", "TLMUSD",
-        "GALAUSD", "XANUSD", "DASHUSD", "LISTAUSD", "SUIUSD", "ENAUSD", "DYDXUSD",
-        "DOTUSD", "SOPHUSD", "HIVEUSD", "XRPUSD", "METAXUSD", "GOATUSD", "FILUSD",
+        "LINKUSD", "ETHUSD", "DOGEUSD", "SAGAUSD", "PENDLEUSD", "BCHUSD", "POPCATUSD", "NEARUSD",
+        "LTCUSD", "ARMBUSD", "BILLUSD", "REDUSD", "SPXUSD", "SUSHIUSD", "1000BONKUSD", "WDCBUSD",
+        "XMRUSD", "TRXUSD", "RIVERUSD", "SKHYBUSD", "RKLBBUSD", "AMZNXUSD", "TRUMPUSD", "PAXGUSD",
+        "ZROUSD", "SLVONUSD", "SPYXUSD", "AVAAIUSD", "LABUSD", "BEATUSD", "POLUSD", "ARCUSD",
+        "BMTUSD", "BBUSD", "RAREUSD", "ORDERUSD", "ETHFIUSD", "RAVEUSD", "BLESSUSD", "NEIROUSD",
+        "MANAUSD", "PUMPUSD", "AKEUSD", "VELVETUSD", "HUSD", "AIOUSD", "SNDKBUSD", "DRAMBUSD",
+        "AINUSD", "VVVUSD", "BUSD", "FFUSD", "EVAAUSD", "SKYAIUSD", "INJUSD", "INTCBUSD",
+        "HYPEUSD", "PENGUUSD", "ESPORTSUSD", "MUBARAKUSD", "TLMUSD", "GALAUSD", "XANUSD",
+        "DASHUSD", "LISTAUSD", "SUIUSD", "ENAUSD", "DYDXUSD", "DOTUSD", "SOPHUSD", "HIVEUSD",
+        "XRPUSD", "METAXUSD", "GOATUSD", "FILUSD",
     ],
 
     # minimum score threshold -- only take high-confidence A+ setups
-    "min_score_threshold": 0.45,
+    "min_score_threshold": 0.50,
 
     # portfolio-level limits (optimized for small $12 account)
     "max_trades_per_day": 8,
@@ -143,11 +140,11 @@ DEFAULT_CONFIG = {
 
     # Break-Even Stop Loss
     "enable_breakeven_sl": True,
-    "breakeven_trigger_pct": 1.5,
+    "breakeven_trigger_pct": 1.0,
 
     # Dynamic Trailing Stop Loss
     "enable_trailing_sl": True,
-    "trailing_distance_pct": 1.5,
+    "trailing_distance_pct": 1.0,
     "trailing_step_pct": 0.3,
 
     # Multi-Timeframe (1-Hour) Trend Confirmation
@@ -160,9 +157,9 @@ DEFAULT_CONFIG = {
     "btc_dump_threshold_pct": 1.0,
     "btc_symbol": "BTCUSD",
 
-    # 2. Partial Take-Profit (50% exit at +1.5% profit)
+    # 2. Partial Take-Profit (50% exit at +1.0% profit)
     "enable_partial_tp": True,
-    "partial_tp_trigger_pct": 1.5,
+    "partial_tp_trigger_pct": 1.0,
     "partial_tp_ratio": 0.5,
 
     # 3. VWAP Upper Band Overbought Filter (+1.5 StdDev)
@@ -541,6 +538,12 @@ def compute_diagnostics(symbol, candles, config):
                 if curr_fast < curr_slow:
                     fresh_cross_down = True
                     break
+
+        if config.get("require_cross_confirmation", False) and n_fast >= 3:
+            if fresh_cross_up and not (fast[-2] > slow[-2]):
+                fresh_cross_up = False
+            if fresh_cross_down and not (fast[-2] < slow[-2]):
+                fresh_cross_down = False
     # -----------------------------------------------------------------------
 
     trend_aligned = curr_fast > curr_slow
@@ -706,16 +709,31 @@ def compute_diagnostics(symbol, candles, config):
     }
 
 
+def _extract_order_id(order_result):
+    if not isinstance(order_result, dict):
+        return None
+    for k in ("id", "order_id"):
+        if order_result.get(k):
+            return order_result[k]
+    res = order_result.get("result") or order_result.get("data")
+    if isinstance(res, dict):
+        for k in ("id", "order_id"):
+            if res.get(k):
+                return res[k]
+    return None
+
+
 # ---------------------------------------------------------------------
 # StrategyManager
 # ---------------------------------------------------------------------
 class StrategyManager:
-    def __init__(self, feed, client, watchlist, config=None, place_order_fn=None):
+    def __init__(self, feed, client, watchlist, config=None, place_order_fn=None, signed_request_fn=None):
         self.feed = feed
         self.client = client
         self.symbols = list(watchlist)
         self.config = {**DEFAULT_CONFIG, **(config or {})}
         self.place_order_fn = place_order_fn
+        self.signed_request_fn = signed_request_fn
 
         self.product_info = resolve_product_info(client, self.symbols)
 
@@ -778,15 +796,138 @@ class StrategyManager:
             self.circuit_broken = False
 
     def _prune_failed_symbols(self):
-        cooldown = self.config.get("failed_retry_cooldown_sec", 300)
+        fail_cd = self.config.get("failed_retry_cooldown_sec", 1800)
+        exit_cd = self.config.get("post_exit_cooldown_sec", 300)
         now = time.time()
         with self.lock:
-            self.failed_symbols = {
-                s: t for s, t in self.failed_symbols.items() if now - t < cooldown
-            }
+            kept = {}
+            for s, v in self.failed_symbols.items():
+                if isinstance(v, tuple):
+                    t, reason = v
+                    cd = exit_cd if reason == "exit" else fail_cd
+                else:
+                    t, cd = v, fail_cd  # backward compat
+                if now - t < cd:
+                    kept[s] = v
+            self.failed_symbols = kept
 
     # -- position recovery ---------------------------------------------
     def _sync_open_positions(self):
+        recovered = 0
+        if not self.signed_request_fn:
+            return self._sync_open_positions_fallback()
+
+        try:
+            ok, status, positions_data = self.signed_request_fn("GET", "/v2/positions/margined")
+            if not ok:
+                logger.warning("Batch position request failed (status %s), using fallback", status)
+                return self._sync_open_positions_fallback()
+
+            positions_list = []
+            if isinstance(positions_data, list):
+                positions_list = positions_data
+            elif isinstance(positions_data, dict):
+                res = positions_data.get("result", positions_data)
+                if isinstance(res, list):
+                    positions_list = res
+
+            # BATCH CALL SUCCESSFUL: Empty list means zero open positions on exchange
+            if not positions_list:
+                logger.info("Batch sync: 0 open positions found on exchange")
+                return
+
+            pid_to_symbol = {info["product_id"]: sym for sym, info in self.product_info.items() if info.get("product_id")}
+
+            for pos in positions_list:
+                if not isinstance(pos, dict):
+                    continue
+                pid = pos.get("product_id")
+                symbol = pid_to_symbol.get(pid) or pos.get("symbol")
+                if not symbol or symbol not in self.product_info:
+                    continue
+
+                raw_size = pos.get("size", 0)
+                try:
+                    size = float(raw_size) if raw_size is not None else 0.0
+                except (TypeError, ValueError):
+                    size = 0.0
+                if size == 0:
+                    continue
+
+                direction = "long" if size > 0 else "short"
+                side = "buy" if direction == "long" else "sell"
+                qty = max(abs(int(size)), 1)
+
+                entry_price = None
+                for k in ("entry_price", "average_entry_price", "avg_entry_price",
+                          "open_price", "average_open_price"):
+                    if pos.get(k) is not None:
+                        try:
+                            entry_price = float(pos[k])
+                            break
+                        except (TypeError, ValueError):
+                            pass
+                if entry_price is None:
+                    candles = self.feed.get_candles(symbol, limit=2)
+                    if candles:
+                        entry_price = candles[-1]["close"]
+                if entry_price is None:
+                    continue
+
+                info = self.product_info.get(symbol, {})
+                contract_value = float(info.get("contract_value", 1.0) or 1.0)
+
+                # Seed internal SL/TP so recovered positions are protected immediately
+                rec_sl, rec_tp = self._seed_sl_tp_for_recovery(symbol, direction, entry_price)
+
+                rec_order_id = None
+                if self.signed_request_fn:
+                    try:
+                        ok_orders, _, orders_resp = self.signed_request_fn(
+                            "GET", "/v2/orders",
+                            query_params={"product_ids": str(pid), "states": "open"},
+                        )
+                        if ok_orders and orders_resp:
+                            o_list = orders_resp.get("result", orders_resp) if isinstance(orders_resp, dict) else orders_resp
+                            if isinstance(o_list, list):
+                                for o in o_list:
+                                    if isinstance(o, dict) and (o.get("product_id") == pid or str(o.get("product_id")) == str(pid)):
+                                        rec_order_id = o.get("id") or o.get("order_id")
+                                        break
+                    except Exception:
+                        pass
+
+                with self.lock:
+                    if symbol in self.open_trades:
+                        continue
+                    self.open_trades[symbol] = {
+                        "direction": direction,
+                        "side": side,
+                        "product_id": pid,
+                        "contract_value": contract_value,
+                        "entry_price": entry_price,
+                        "qty": qty,
+                        "sl_price": rec_sl,
+                        "tp_price": rec_tp,
+                        "entry_time": datetime.now(timezone.utc).isoformat(),
+                        "entry_ts": time.time(),
+                        "score": None,
+                        "order_result": {"recovered": True, "id": rec_order_id} if rec_order_id else {"recovered": True},
+                        "recovered": True,
+                    }
+                recovered += 1
+                logger.info(
+                    "RECOVERED open position %s [%s] qty=%s entry≈%s SL=%.6f TP=%.6f",
+                    symbol, direction, qty, entry_price, rec_sl, rec_tp,
+                )
+        except Exception as e:
+            logger.warning("Could not batch sync positions, using fallback: %s", e)
+            return self._sync_open_positions_fallback()
+
+        if recovered:
+            logger.info("Synced %d existing position(s) from exchange", recovered)
+
+    def _sync_open_positions_fallback(self):
         recovered = 0
         for symbol, info in list(self.product_info.items()):
             pid = info.get("product_id")
@@ -823,13 +964,11 @@ class StrategyManager:
                     if candles:
                         entry_price = candles[-1]["close"]
                 if entry_price is None:
-                    logger.warning(
-                        "Recovered position for %s but no entry price — skipping track",
-                        symbol,
-                    )
                     continue
 
                 contract_value = float(info.get("contract_value", 1.0) or 1.0)
+                # Seed internal SL/TP so recovered positions are protected immediately
+                rec_sl, rec_tp = self._seed_sl_tp_for_recovery(symbol, direction, entry_price)
 
                 with self.lock:
                     if symbol in self.open_trades:
@@ -841,8 +980,8 @@ class StrategyManager:
                         "contract_value": contract_value,
                         "entry_price": entry_price,
                         "qty": qty,
-                        "sl_price": None,
-                        "tp_price": None,
+                        "sl_price": rec_sl,
+                        "tp_price": rec_tp,
                         "entry_time": datetime.now(timezone.utc).isoformat(),
                         "entry_ts": time.time(),
                         "score": None,
@@ -850,16 +989,10 @@ class StrategyManager:
                         "recovered": True,
                     }
                 recovered += 1
-                logger.info(
-                    "RECOVERED open position %s [%s] qty=%s entry≈%s "
-                    "(no bracket — monitor waits for flat)",
-                    symbol, direction, qty, entry_price,
-                )
-            except Exception as e:
-                logger.warning("Could not sync position for %s: %s", symbol, e)
-
+            except Exception:
+                pass
         if recovered:
-            logger.info("Synced %d existing position(s) from exchange", recovered)
+            logger.info("Synced %d existing position(s) from exchange (fallback)", recovered)
 
     def _check_btc_flash_crash(self):
         if not self.config.get("enable_btc_crash_filter", True):
@@ -962,16 +1095,23 @@ class StrategyManager:
         if not self._is_within_trading_session():
             return
 
-        cooldown_sec = self.config.get("failed_retry_cooldown_sec", 300)
+        fail_cd = self.config.get("failed_retry_cooldown_sec", 1800)
+        exit_cd = self.config.get("post_exit_cooldown_sec", 300)
         now = time.time()
         min_score = self.config.get("min_score_threshold", 0.0)
         btc_crash = getattr(self, "btc_crash_active", False)
 
         with self.lock:
             open_symbols = set(self.open_trades.keys())
-            cooling_down = {
-                s for s, t in self.failed_symbols.items() if now - t < cooldown_sec
-            }
+            cooling_down = set()
+            for s, v in self.failed_symbols.items():
+                if isinstance(v, tuple):
+                    t, reason = v
+                else:
+                    t, reason = v, "fail"
+                cd = exit_cd if reason == "exit" else fail_cd
+                if now - t < cd:
+                    cooling_down.add(s)
             scan_snapshot = dict(self.last_scan)
 
         candidates = []
@@ -1055,6 +1195,20 @@ class StrategyManager:
             tp_price = _smart_round(entry_price * (1 - self.config["target_pct"] / 100))
         return sl_price, tp_price
 
+    def _seed_sl_tp_for_recovery(self, symbol, direction, entry_price):
+        """Compute protective SL/TP for a recovered position so internal monitor can act."""
+        candles = self.feed.get_candles(symbol, limit=50)
+        atr_val = None
+        if candles and len(candles) >= 15:
+            atr_vals = atr(
+                [c["high"] for c in candles],
+                [c["low"] for c in candles],
+                [c["close"] for c in candles],
+                self.config.get("atr_period", 14),
+            )
+            atr_val = atr_vals[-1] if atr_vals else None
+        return self._compute_sl_tp(direction, entry_price, atr_val)
+
     def _get_live_available_margin(self):
         """Fetches real-time available margin balance from Delta Exchange via client."""
         if not self.config.get("dry_run", True) and self.client and hasattr(self.client, "get_balances"):
@@ -1117,11 +1271,18 @@ class StrategyManager:
         loss_per_contract = sl_move * contract_value
         qty = max(int(risk_amount // loss_per_contract), 1) if loss_per_contract > 0 else 1
 
-        if loss_per_contract > 0 and qty * loss_per_contract > risk_amount * 1.05:
+        if loss_per_contract > 0 and 1 * loss_per_contract > risk_amount * 1.05:
             logger.warning(
-                "qty floor=1 exceeds risk_pct for %s: risk≈%.2f vs budget %.2f",
-                symbol, qty * loss_per_contract, risk_amount,
+                "Skipping entry for %s: min 1 contract risk (%.2f) exceeds risk budget (%.2f)",
+                symbol, loss_per_contract, risk_amount,
             )
+            with self.lock:
+                self.failed_symbols[symbol] = (time.time(), "fail")
+            self._log_trade(
+                "ENTRY_SKIPPED", symbol, entry_price, 0, sig,
+                {"error": f"min contract risk {loss_per_contract:.4f} > budget {risk_amount:.4f}"}
+            )
+            return
 
         notional_per_contract = entry_price * contract_value
 
@@ -1160,7 +1321,7 @@ class StrategyManager:
                     symbol, notional_per_contract, max_notional_margin, avail_bal
                 )
                 with self.lock:
-                    self.failed_symbols[symbol] = time.time()
+                    self.failed_symbols[symbol] = (time.time(), "fail")
                 self._log_trade("ENTRY_SKIPPED", symbol, entry_price, 0, sig, {
                     "error": f"Insufficient available balance (avail={avail_bal:.2f})"
                 })
@@ -1175,7 +1336,7 @@ class StrategyManager:
             order_result.get("error") or self._order_looks_rejected(order_result)
         ):
             with self.lock:
-                self.failed_symbols[symbol] = time.time()
+                self.failed_symbols[symbol] = (time.time(), "fail")
             self._log_trade("ENTRY_FAILED", symbol, entry_price, qty, sig, order_result)
             logger.warning(
                 "ENTRY FAILED %s (%s): %s",
@@ -1251,6 +1412,44 @@ class StrategyManager:
             logger.error("Bracket entry failed: %s", e, exc_info=True)
             return {"error": str(e)}
 
+    def _get_last_fill_price(self, product_id, side=None, after_ts=None):
+        if not self.signed_request_fn:
+            return None
+        try:
+            ok, status, fills_data = self.signed_request_fn(
+                "GET", "/v2/fills",
+                query_params={"product_ids": str(product_id), "page_size": 20},
+            )
+            if not ok or not fills_data:
+                return None
+            res = fills_data.get("result", fills_data) if isinstance(fills_data, dict) else fills_data
+            if not isinstance(res, list):
+                return None
+            for f in res:
+                if not isinstance(f, dict):
+                    continue
+                if side and f.get("side") and f["side"].lower() != side.lower():
+                    continue
+                if after_ts:
+                    ft = f.get("created_at") or f.get("timestamp") or f.get("time")
+                    if ft is not None:
+                        try:
+                            if isinstance(ft, str):
+                                ft = datetime.fromisoformat(ft.replace("Z", "+00:00")).timestamp()
+                            if float(ft) < after_ts:
+                                continue
+                        except Exception:
+                            pass
+                for k in ("price", "fill_price", "average_fill_price"):
+                    if f.get(k) is not None:
+                        try:
+                            return float(f[k])
+                        except (TypeError, ValueError):
+                            pass
+        except Exception as e:
+            logger.warning("Failed to fetch fill price for product %s: %s", product_id, e)
+        return None
+
     # -- monitoring / exit ---------------------------------------------
     def _check_breakeven_sl(self, symbol):
         if not self.config.get("enable_breakeven_sl", True):
@@ -1259,6 +1458,8 @@ class StrategyManager:
         with self.lock:
             trade = self.open_trades.get(symbol)
             if not trade or trade.get("breakeven_activated"):
+                return
+            if time.time() - trade.get("last_be_update_attempt", 0) < 60:
                 return
             trade_copy = dict(trade)
 
@@ -1272,7 +1473,7 @@ class StrategyManager:
             return
         curr_price = candles[-1]["close"]
 
-        trigger_pct = float(self.config.get("breakeven_trigger_pct", 1.5) or 1.5)
+        trigger_pct = float(self.config.get("breakeven_trigger_pct", 1.0) or 1.0)
         should_activate = False
 
         if direction == "long" and curr_price >= entry_price * (1 + trigger_pct / 100):
@@ -1283,6 +1484,33 @@ class StrategyManager:
             new_sl = _smart_round(entry_price * 0.9995)
 
         if should_activate:
+            with self.lock:
+                if symbol in self.open_trades:
+                    self.open_trades[symbol]["last_be_update_attempt"] = time.time()
+
+            # In live mode (dry_run == False), attempt to update the bracket SL order on Delta FIRST
+            if not self.config.get("dry_run", True) and self.place_order_fn:
+                try:
+                    product_id = trade_copy.get("product_id")
+                    if not product_id:
+                        logger.warning("Cannot update live break-even SL for %s: missing product_id", symbol)
+                        return
+                    order_body = {
+                        "product_id": product_id,
+                        "bracket_stop_loss_price": str(new_sl),
+                    }
+                    order_id = _extract_order_id(trade_copy.get("order_result"))
+                    if order_id:
+                        order_body["id"] = order_id
+                    logger.info("Sending break-even bracket SL update for %s: %s", symbol, order_body)
+                    res = self.place_order_fn(order_body)
+                    if isinstance(res, dict) and (res.get("error") or self._order_looks_rejected(res)):
+                        logger.warning("Live break-even SL update REJECTED for %s: %s", symbol, res)
+                        return  # ABORT: Do not update internal state if exchange update failed!
+                except Exception as e:
+                    logger.warning("Could not update live bracket SL on Delta for %s: %s", symbol, e)
+                    return  # ABORT: Do not update internal state if exchange call raised exception!
+
             with self.lock:
                 if symbol in self.open_trades:
                     self.open_trades[symbol]["sl_price"] = new_sl
@@ -1298,24 +1526,6 @@ class StrategyManager:
                 {"note": f"SL moved to break-even ({new_sl})"}
             )
 
-            # If live trading (dry_run == False), attempt to update the bracket SL order on Delta
-            if not self.config.get("dry_run", True) and self.place_order_fn:
-                try:
-                    product_id = trade_copy.get("product_id")
-                    if product_id:
-                        order_body = {
-                            "product_id": product_id,
-                            "bracket_stop_loss_price": str(new_sl),
-                        }
-                        # If order_result contains id, include it
-                        res = trade_copy.get("order_result")
-                        if isinstance(res, dict) and res.get("id"):
-                            order_body["id"] = res["id"]
-                        logger.info("Sending break-even bracket SL update for %s: %s", symbol, order_body)
-                        self.place_order_fn(order_body)
-                except Exception as e:
-                    logger.warning("Could not update live bracket SL on Delta for %s: %s", symbol, e)
-
     def _check_trailing_sl(self, symbol):
         if not self.config.get("enable_trailing_sl", True):
             return
@@ -1323,6 +1533,8 @@ class StrategyManager:
         with self.lock:
             trade = self.open_trades.get(symbol)
             if not trade:
+                return
+            if time.time() - trade.get("last_trailing_update_attempt", 0) < 60:
                 return
             trade_copy = dict(trade)
 
@@ -1337,22 +1549,48 @@ class StrategyManager:
             return
         curr_price = candles[-1]["close"]
 
-        dist_pct = float(self.config.get("trailing_distance_pct", 1.5) or 1.5)
+        dist_pct = float(self.config.get("trailing_distance_pct", 1.0) or 1.0)
         step_pct = float(self.config.get("trailing_step_pct", 0.3) or 0.3)
 
         updated_sl = None
         if direction == "long":
             target_sl = _smart_round(curr_price * (1 - dist_pct / 100))
-            min_new_sl = _smart_round(current_sl * (1 + step_pct / 100))
+            min_new_sl = max(_smart_round(current_sl * (1 + step_pct / 100)), current_sl)
             if target_sl >= min_new_sl and target_sl > current_sl:
                 updated_sl = target_sl
         elif direction == "short":
             target_sl = _smart_round(curr_price * (1 + dist_pct / 100))
-            max_new_sl = _smart_round(current_sl * (1 - step_pct / 100))
+            max_new_sl = min(_smart_round(current_sl * (1 - step_pct / 100)), current_sl)
             if target_sl <= max_new_sl and target_sl < current_sl:
                 updated_sl = target_sl
 
         if updated_sl is not None:
+            with self.lock:
+                if symbol in self.open_trades:
+                    self.open_trades[symbol]["last_trailing_update_attempt"] = time.time()
+
+            # In live mode (dry_run == False), attempt to update the bracket SL order on Delta FIRST
+            if not self.config.get("dry_run", True) and self.place_order_fn:
+                try:
+                    product_id = trade_copy.get("product_id")
+                    if not product_id:
+                        logger.warning("Cannot update live trailing SL for %s: missing product_id", symbol)
+                        return
+                    order_body = {
+                        "product_id": product_id,
+                        "bracket_stop_loss_price": str(updated_sl),
+                    }
+                    order_id = _extract_order_id(trade_copy.get("order_result"))
+                    if order_id:
+                        order_body["id"] = order_id
+                    res = self.place_order_fn(order_body)
+                    if isinstance(res, dict) and (res.get("error") or self._order_looks_rejected(res)):
+                        logger.warning("Live trailing SL update REJECTED for %s: %s", symbol, res)
+                        return  # ABORT: Do not update internal state if exchange update failed!
+                except Exception as e:
+                    logger.warning("Could not update live trailing SL for %s: %s", symbol, e)
+                    return  # ABORT: Do not update internal state if exchange call raised exception!
+
             with self.lock:
                 if symbol in self.open_trades:
                     self.open_trades[symbol]["sl_price"] = updated_sl
@@ -1366,17 +1604,6 @@ class StrategyManager:
                 {"direction": direction, "score": trade_copy.get("score")},
                 {"note": f"Trailing SL moved to {updated_sl}"}
             )
-
-            if not self.config.get("dry_run", True) and self.place_order_fn:
-                try:
-                    product_id = trade_copy.get("product_id")
-                    if product_id:
-                        self.place_order_fn({
-                            "product_id": product_id,
-                            "bracket_stop_loss_price": str(updated_sl),
-                        })
-                except Exception as e:
-                    logger.warning("Could not update live trailing SL for %s: %s", symbol, e)
 
     def _check_partial_tp(self, symbol):
         if not self.config.get("enable_partial_tp", True):
@@ -1399,7 +1626,7 @@ class StrategyManager:
             return
         curr_price = candles[-1]["close"]
 
-        trigger_pct = float(self.config.get("partial_tp_trigger_pct", 1.5) or 1.5)
+        trigger_pct = float(self.config.get("partial_tp_trigger_pct", 1.0) or 1.0)
         ratio = float(self.config.get("partial_tp_ratio", 0.5) or 0.5)
 
         triggered = False
@@ -1412,47 +1639,136 @@ class StrategyManager:
             exit_qty = max(1, int(qty * ratio))
             rem_qty = qty - exit_qty
             be_sl = _smart_round(entry_price * 1.0005) if direction == "long" else _smart_round(entry_price * 0.9995)
+            sl_moved = True
 
-            logger.info(
-                "💰 PARTIAL TAKE-PROFIT TRIGGERED for %s [%s]: Exiting %d of %d contracts at %.6f (+%.2f%%). Setting BE SL=%.6f for remaining %d",
-                symbol, direction, exit_qty, qty, curr_price, trigger_pct, be_sl, rem_qty
-            )
+            if not self.config.get("dry_run", True) and self.place_order_fn:
+                product_id = trade_copy.get("product_id")
+                if not product_id:
+                    return
+                exit_side = "sell" if direction == "long" else "buy"
+                try:
+                    res = self.place_order_fn({
+                        "product_id": product_id,
+                        "size": exit_qty,
+                        "side": exit_side,
+                        "order_type": "market_order",
+                        "reduce_only": True,
+                    })
+                except Exception as e:
+                    logger.error("Partial TP order raised for %s (%s) -- marking done to avoid duplicate", symbol, e)
+                    with self.lock:
+                        if symbol in self.open_trades:
+                            self.open_trades[symbol]["partial_tp_done"] = True
+                    return
+
+                if isinstance(res, dict) and (res.get("error") or self._order_looks_rejected(res)):
+                    logger.warning("Live partial TP reduce-only order failed for %s: %s", symbol, res)
+                    return
+
+                # Reduce-only order succeeded: attempt bracket SL update safely
+                sl_moved = False
+                try:
+                    body = {"product_id": product_id, "bracket_stop_loss_price": str(be_sl)}
+                    oid = _extract_order_id(trade_copy.get("order_result"))
+                    if oid:
+                        body["id"] = oid
+                    sl_res = self.place_order_fn(body)
+                    if isinstance(sl_res, dict) and (sl_res.get("error") or self._order_looks_rejected(sl_res)):
+                        logger.warning("BE SL update after partial TP rejected for %s: %s", symbol, sl_res)
+                    else:
+                        sl_moved = True
+                except Exception as e:
+                    logger.warning("BE SL update after partial TP failed for %s: %s", symbol, e)
+
+            if sl_moved:
+                logger.info(
+                    "💰 PARTIAL TAKE-PROFIT TRIGGERED for %s [%s]: Exiting %d of %d contracts at %.6f (+%.2f%%). Setting BE SL=%.6f for remaining %d",
+                    symbol, direction, exit_qty, qty, curr_price, trigger_pct, be_sl, rem_qty
+                )
+            else:
+                logger.info(
+                    "💰 PARTIAL TAKE-PROFIT TRIGGERED for %s [%s]: Exiting %d of %d contracts at %.6f (+%.2f%%). Exchange BE SL update failed (will retry in 60s)",
+                    symbol, direction, exit_qty, qty, curr_price, trigger_pct, rem_qty
+                )
 
             pnl = self._pnl_for_trade({**trade_copy, "qty": exit_qty}, curr_price)
 
             with self.lock:
                 if symbol in self.open_trades:
                     self.open_trades[symbol]["qty"] = rem_qty
-                    self.open_trades[symbol]["sl_price"] = be_sl
                     self.open_trades[symbol]["partial_tp_done"] = True
-                    self.open_trades[symbol]["breakeven_activated"] = True
+                    self.open_trades[symbol]["last_be_update_attempt"] = time.time()
+                    if sl_moved:
+                        self.open_trades[symbol]["sl_price"] = be_sl
+                        self.open_trades[symbol]["breakeven_activated"] = True
                     self.realized_pnl_today += pnl
 
             self._log_trade(
                 "PARTIAL_TP", symbol, curr_price, exit_qty,
                 {"direction": direction, "score": trade_copy.get("score")},
-                {"note": f"Partial exit {exit_qty}/{qty} @ {curr_price:.6f}, SL moved to BE ({be_sl})"},
+                {"note": f"Partial exit {exit_qty}/{qty} @ {curr_price:.6f}" + (f", SL moved to BE ({be_sl})" if sl_moved else ", SL update pending")},
                 pnl=pnl
             )
 
+    def _check_recovered_position_exits(self, symbol):
+        """Monitors recovered or missing-order-id positions in live mode and executes a reduce-only market close when internal SL/TP is breached."""
+        with self.lock:
+            trade = self.open_trades.get(symbol)
+            if not trade or trade.get("in_closing"):
+                return
+            trade_copy = dict(trade)
+
+        order_id = _extract_order_id(trade_copy.get("order_result"))
+        if order_id and not trade_copy.get("recovered"):
+            return
+
+        direction = trade_copy.get("direction", "long")
+        sl, tp = trade_copy.get("sl_price"), trade_copy.get("tp_price")
+        if sl is None and tp is None:
+            return
+
+        candles = self.feed.get_candles(symbol, limit=3)
+        if not candles:
+            return
+        curr_price = candles[-1]["close"]
+
+        hit_reason = None
+        if direction == "long":
+            if sl is not None and curr_price <= sl:
+                hit_reason = f"Internal SL hit ({curr_price:.6f} <= {sl:.6f})"
+            elif tp is not None and curr_price >= tp:
+                hit_reason = f"Internal TP hit ({curr_price:.6f} >= {tp:.6f})"
+        else:
+            if sl is not None and curr_price >= sl:
+                hit_reason = f"Internal SL hit ({curr_price:.6f} >= {sl:.6f})"
+            elif tp is not None and curr_price <= tp:
+                hit_reason = f"Internal TP hit ({curr_price:.6f} <= {tp:.6f})"
+
+        if hit_reason:
+            logger.info("⚡ Live internal trigger for %s [%s]: %s — placing market exit", symbol, direction, hit_reason)
+            with self.lock:
+                if symbol in self.open_trades:
+                    self.open_trades[symbol]["in_closing"] = True
             if not self.config.get("dry_run", True) and self.place_order_fn:
+                exit_side = "sell" if direction == "long" else "buy"
                 try:
-                    product_id = trade_copy.get("product_id")
-                    if product_id:
-                        exit_side = "sell" if direction == "long" else "buy"
-                        self.place_order_fn({
-                            "product_id": product_id,
-                            "size": exit_qty,
-                            "side": exit_side,
-                            "order_type": "market_order",
-                            "reduce_only": True
-                        })
-                        self.place_order_fn({
-                            "product_id": product_id,
-                            "bracket_stop_loss_price": str(be_sl),
-                        })
+                    res = self.place_order_fn({
+                        "product_id": trade_copy["product_id"],
+                        "size": max(abs(int(trade_copy.get("qty", 1))), 1),
+                        "side": exit_side,
+                        "order_type": "market_order",
+                        "reduce_only": True
+                    })
+                    fill = self._get_last_fill_price(trade_copy["product_id"], side=exit_side, after_ts=trade_copy.get("entry_ts"))
+                    exit_p = fill if fill is not None else curr_price
+                    self._close_trade(symbol, trade_copy, exit_p, hit_reason)
                 except Exception as e:
-                    logger.warning("Could not execute live partial TP for %s: %s", symbol, e)
+                    logger.error("Failed to execute live internal exit for %s: %s", symbol, e)
+                    with self.lock:
+                        if symbol in self.open_trades:
+                            self.open_trades[symbol].pop("in_closing", None)
+            else:
+                self._close_trade(symbol, trade_copy, curr_price, hit_reason)
 
     def _monitor_loop(self):
         while self.running:
@@ -1463,6 +1779,7 @@ class StrategyManager:
                     self._check_partial_tp(symbol)
                     self._check_breakeven_sl(symbol)
                     self._check_trailing_sl(symbol)
+                    self._check_recovered_position_exits(symbol)
                     if self.config.get("dry_run", True):
                         self._check_dry_run_exit(symbol)
                     else:
@@ -1507,7 +1824,7 @@ class StrategyManager:
                     "CIRCUIT BREAKER TRIGGERED: Daily loss limit (%.4f) reached! Realized PnL today: %.4f",
                     loss_limit, self.realized_pnl_today
                 )
-            self.failed_symbols[symbol] = time.time()
+            self.failed_symbols[symbol] = (time.time(), "exit")
         self._log_trade(
             "EXIT", symbol, exit_price, trade["qty"],
             {"direction": trade.get("direction"), "score": trade.get("score")},
@@ -1640,31 +1957,35 @@ class StrategyManager:
         if size != 0:
             return
 
-        exit_price = mark
-        if exit_price is None:
-            candles = self.feed.get_candles(symbol, limit=3)
-            if candles:
-                exit_price = candles[-1]["close"]
-        if exit_price is None:
-            exit_price = (
-                trade.get("tp_price")
-                or trade.get("sl_price")
-                or trade["entry_price"]
-            )
+        fill_price = self._get_last_fill_price(trade["product_id"], after_ts=trade.get("entry_ts"))
+        if fill_price is not None:
+            exit_price = fill_price
         else:
-            direction = trade.get("direction", "long")
-            sl, tp = trade.get("sl_price"), trade.get("tp_price")
-            if sl is not None and tp is not None:
-                if direction == "long":
-                    if exit_price <= sl:
-                        exit_price = sl
-                    elif exit_price >= tp:
-                        exit_price = tp
-                else:
-                    if exit_price >= sl:
-                        exit_price = sl
-                    elif exit_price <= tp:
-                        exit_price = tp
+            exit_price = mark
+            if exit_price is None:
+                candles = self.feed.get_candles(symbol, limit=3)
+                if candles:
+                    exit_price = candles[-1]["close"]
+            if exit_price is None:
+                exit_price = (
+                    trade.get("tp_price")
+                    or trade.get("sl_price")
+                    or trade["entry_price"]
+                )
+            else:
+                direction = trade.get("direction", "long")
+                sl, tp = trade.get("sl_price"), trade.get("tp_price")
+                if sl is not None and tp is not None:
+                    if direction == "long":
+                        if exit_price <= sl:
+                            exit_price = sl
+                        elif exit_price >= tp:
+                            exit_price = tp
+                    else:
+                        if exit_price >= sl:
+                            exit_price = sl
+                        elif exit_price <= tp:
+                            exit_price = tp
 
         note = (
             "recovered position closed"
@@ -1729,7 +2050,16 @@ class StrategyManager:
             "active_trades_count": len(open_trades),
             "max_concurrent_trades": self.config["max_concurrent_trades"],
             "realized_pnl_today": round(realized, 4),
-            "failed_symbols_cooldown": failed_symbols,
+            "failed_symbols_cooldown": {
+                s: (v[0] if isinstance(v, tuple) else v)
+                for s, v in failed_symbols.items()
+                if not (isinstance(v, tuple) and v[1] == "exit")
+            },
+            "exit_cooldown": {
+                s: v[0]
+                for s, v in failed_symbols.items()
+                if isinstance(v, tuple) and v[1] == "exit"
+            },
             "candidates": sorted(
                 [s for s in scan_grid if s.get("qualifies")],
                 key=lambda s: -s["score"],

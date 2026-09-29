@@ -202,17 +202,33 @@ def _delta_json_response(ok, status_code, data):
         return jsonify({"success": True, "data": data.get("result", data)})
     return jsonify({"success": False, "error": _friendly_error(data)}), status_code if status_code >= 400 else 400
 
+_SET_LEVERAGE_CACHE = {}
+
 def _place_order_for_strategy(order_body):
-    """Strategy entry path: soft-set leverage then place bracket market order."""
+    """Strategy entry / update path: routes bracket edits to PUT /v2/orders/bracket, else POST /v2/orders."""
     product_id = order_body.get("product_id")
-    if product_id and not DRY_RUN:
+    order_id = order_body.get("id")
+
+    # If this is a bracket edit request (has bracket SL/TP fields, without size/side)
+    if ("bracket_stop_loss_price" in order_body or "bracket_take_profit_price" in order_body) and "size" not in order_body:
+        if not order_id:
+            return {"error": "Missing order_id for bracket update"}
+        ok, status, data = _signed_request("PUT", "/v2/orders/bracket", body=order_body)
+        if ok:
+            return data.get("result", data)
+        return {"error": _friendly_error(data).get("message") or str(data)}
+
+    # Otherwise new order placement: soft-set leverage first ONLY for new entry orders (cached per product)
+    if product_id and not DRY_RUN and not order_body.get("reduce_only"):
         try:
             lev = strategy.config.get("max_leverage", 3)
-            _signed_request(
-                "POST",
-                f"/v2/products/{product_id}/orders/leverage",
-                body={"leverage": lev},
-            )
+            if _SET_LEVERAGE_CACHE.get(product_id) != lev:
+                _signed_request(
+                    "POST",
+                    f"/v2/products/{product_id}/orders/leverage",
+                    body={"leverage": lev},
+                )
+                _SET_LEVERAGE_CACHE[product_id] = lev
         except Exception as e:
             print(f"[strategy] leverage set failed for product {product_id}: {e}")
 
@@ -231,6 +247,7 @@ strategy = StrategyManager(
         "dry_run": DRY_RUN
     },
     place_order_fn=_place_order_for_strategy,
+    signed_request_fn=_signed_request,
 )
 
 
@@ -1041,6 +1058,7 @@ def sync_watchlist():
 
 @app.route("/strategy/status", methods=["GET"])
 def strategy_status():
+    _sync_capital_from_balance()
     return jsonify({"success": True, "data": strategy.status()})
 
 

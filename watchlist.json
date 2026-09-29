@@ -1,15 +1,10 @@
 {
   "symbols": [
     "BTCUSD",
-    "ETHUSD",
     "SOLUSD",
     "BNBUSD",
-    "DOGEUSD",
     "AVAXUSD",
-    "LINKUSD",
-    "LTCUSD",
     "ARBUSD",
-    "NEARUSD",
     "APTUSD",
     "OPUSD",
     "TIAUSD",
@@ -20,9 +15,7 @@
     "TAOUSD",
     "WLDUSD",
     "JUPUSD",
-    "PENDLEUSD",
     "ONDOUSD",
-    "WIFUSD",
-    "POPCATUSD"
+    "WIFUSD"
   ]
 }

@@ -8,6 +8,13 @@ python3 check_pnl.py
 pm2 logs delta-service --lines 50
 
 
+ssh root@187.127.130.77
+
+
+3&9?Jta)?zH(HITk
+
+
+
 cd /var/www/delta-service
 git pull origin main
 pm2 restart delta-service
