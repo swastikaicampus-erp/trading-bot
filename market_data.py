@@ -6,12 +6,24 @@ import requests
 # pyrefly: ignore [missing-import]
 import websocket
 
-WS_URL = "wss://socket.india.delta.exchange"
-REST_BASE = "https://api.india.delta.exchange"
+# ---------------------------------------------------------------------------
+# WebSocket endpoint migration (Delta India, effective August 2026):
+#   OLD (deprecated/removed Jul 2026): wss://socket.india.delta.exchange
+#   NEW public market-data endpoint:   wss://public-socket.india.delta.exchange
+# Channel names also changed:
+#   OLD: v2/ticker       NEW: ticker
+#   Candlestick channel (candlestick_1m) stays the same on new endpoint.
+# ---------------------------------------------------------------------------
+WS_URL     = "wss://public-socket.india.delta.exchange"  # new public endpoint
+REST_BASE  = "https://api.india.delta.exchange"
 
-RESOLUTION = "1m"          # candle timeframe
-BACKFILL_MINUTES = 200     # how many past candles to preload per symbol
-SUBSCRIBE_CHUNK_SIZE = 25  # Delta ko small chunks (25) me bhejte hain taaki WS disconnect na ho.
+# Channel names for the new public WS endpoint
+WS_TICKER_CHANNEL = "ticker"                    # was "v2/ticker" on legacy endpoint
+WS_CANDLE_CHANNEL = f"candlestick_{{RESOLUTION}}"  # unchanged, templated below
+
+RESOLUTION          = "1m"   # candle timeframe
+BACKFILL_MINUTES    = 200    # past candles to preload per symbol
+SUBSCRIBE_CHUNK_SIZE = 25   # small chunks to avoid oversized WS frames
 
 # ---------------------------------------------------------------------------
 # NETWORK: Force IPv4 for all outbound connections (REST + WebSocket).
@@ -162,7 +174,7 @@ class MarketDataFeed:
         with self._ws_lock:
             if self._ws is not None:
                 try:
-                    self._subscribe(self._ws, "v2/ticker", [symbol])
+                    self._subscribe(self._ws, WS_TICKER_CHANNEL, [symbol])
                     self._subscribe(self._ws, f"candlestick_{RESOLUTION}", [symbol])
                 except Exception as e:
                     print(f"[market_data] live subscribe failed for {symbol}: {e}")
@@ -189,7 +201,7 @@ class MarketDataFeed:
             if self._ws is not None:
                 for chunk in _chunks(added, SUBSCRIBE_CHUNK_SIZE):
                     try:
-                        self._subscribe(self._ws, "v2/ticker", chunk)
+                        self._subscribe(self._ws, WS_TICKER_CHANNEL, chunk)
                         self._subscribe(self._ws, f"candlestick_{RESOLUTION}", chunk)
                     except Exception as e:
                         print(f"[market_data] live subscribe failed for chunk {chunk}: {e}")
@@ -209,7 +221,7 @@ class MarketDataFeed:
         with self._ws_lock:
             if self._ws is not None:
                 try:
-                    self._unsubscribe(self._ws, "v2/ticker", [symbol])
+                    self._unsubscribe(self._ws, WS_TICKER_CHANNEL, [symbol])
                     self._unsubscribe(self._ws, f"candlestick_{RESOLUTION}", [symbol])
                 except Exception as e:
                     print(f"[market_data] live unsubscribe failed for {symbol}: {e}")
@@ -255,7 +267,6 @@ class MarketDataFeed:
         pool -- sequential REST calls for 100-150 symbols would take too
         long one-by-one at startup."""
         symbols = self.get_symbols()
-        threads = []
         max_parallel = 10
         for chunk in _chunks(symbols, max_parallel):
             chunk_threads = [threading.Thread(target=self._backfill_one, args=(s,)) for s in chunk]
@@ -263,7 +274,6 @@ class MarketDataFeed:
                 t.start()
             for t in chunk_threads:
                 t.join()
-        _ = threads  # (kept for clarity, no-op)
 
     # ---------- websocket lifecycle ----------
 
@@ -412,9 +422,9 @@ class MarketDataFeed:
                     if self._ws is not ws or not self._running:
                         break
                     try:
-                        self._subscribe(ws, "v2/ticker", chunk)
+                        self._subscribe(ws, WS_TICKER_CHANNEL, chunk)
                     except Exception as e:
-                        print(f"[market_data] subscribe error (v2/ticker): {e}")
+                        print(f"[market_data] subscribe error (ticker): {e}")
                 time.sleep(0.1)
                 with self._ws_lock:
                     if self._ws is not ws or not self._running:
@@ -455,7 +465,10 @@ class MarketDataFeed:
         if not symbol or symbol not in self.candles:
             return
 
-        if msg_type == "v2/ticker":
+        # Accept both new channel name ("ticker") and legacy ("v2/ticker") for
+        # graceful transition — old endpoint may still deliver v2/ticker during
+        # any DNS/load-balancer cutover period.
+        if msg_type in ("ticker", "v2/ticker"):
             with self._lock:
                 if symbol not in self.ticker:
                     return

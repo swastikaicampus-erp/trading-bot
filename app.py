@@ -44,6 +44,36 @@ CORS(app, origins=os.getenv("ALLOWED_ORIGINS", "*").split(","))
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 WATCHLIST_FILE = "watchlist.json"
 
+# Simple API token auth for mutating routes.
+# Set DASHBOARD_API_TOKEN in .env to enable. If unset, auth is disabled
+# (backward-compatible). Send token ONLY via X-API-Token header.
+# FIX 6: Removed ?api_token= query param support — query params appear
+# in web server access logs, proxies, and browser history.
+_DASHBOARD_API_TOKEN = os.getenv("DASHBOARD_API_TOKEN", "")
+
+# Paths exempt from auth even when token is configured
+_AUTH_SAFE_PATHS = {
+    "/health", "/system/status", "/rate-limit",
+    "/candles", "/ticker", "/tickers", "/products", "/watchlist",
+}
+
+@app.before_request
+def _require_api_token():
+    """Block mutating requests unless the correct DASHBOARD_API_TOKEN is
+    provided via the X-API-Token request header. Safe (read-only) routes are
+    always allowed. If no token is configured in .env, this is a no-op."""
+    if not _DASHBOARD_API_TOKEN:
+        return  # auth disabled — no token configured
+    # Allow all GETs to public read routes without a token
+    path = request.path
+    if request.method == "GET" and any(path.startswith(p) for p in _AUTH_SAFE_PATHS):
+        return
+    # Header-only: never read from query params (log-leak risk)
+    token = request.headers.get("X-API-Token")
+    if token != _DASHBOARD_API_TOKEN:
+        from flask import abort
+        abort(401)
+
 # Filter to USD-settled perpetual futures contracts for maximum liquidity and safety
 PERP_QUOTE_ASSET_FILTER = {"USD"}
 
@@ -222,6 +252,19 @@ def _place_order_for_strategy(order_body):
     if product_id and not DRY_RUN and not order_body.get("reduce_only"):
         try:
             lev = strategy.config.get("max_leverage", 3)
+            # product_info is keyed by symbol, not product_id — build reverse map
+            pid_to_info = {
+                info["product_id"]: info
+                for info in (getattr(strategy, "product_info", {}) or {}).values()
+                if info.get("product_id")
+            }
+            p_info = pid_to_info.get(product_id) or {}
+            p_max_lev = p_info.get("max_leverage")
+            if p_max_lev:
+                try:
+                    lev = min(lev, int(float(p_max_lev)))
+                except (TypeError, ValueError):
+                    pass
             if _SET_LEVERAGE_CACHE.get(product_id) != lev:
                 _signed_request(
                     "POST",
@@ -725,11 +768,15 @@ def edit_order(order_id):
 @app.route("/cancel-order", methods=["POST"])
 def cancel_order():
     data = request.json or {}
-    try:
-        response = client.cancel_order(data.get("product_id"), data.get("order_id"))
-        return jsonify({"success": True, "data": response})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    order_id = data.get("order_id")
+    product_id = data.get("product_id")
+    if not order_id or not product_id:
+        return jsonify({"success": False, "error": "order_id and product_id are required"}), 400
+    # FIX: Use _signed_request (consistent with all other order routes) instead
+    # of client.cancel_order which uses a different signing path.
+    body = {"id": order_id, "product_id": product_id}
+    ok, status, resp_data = _signed_request("DELETE", f"/v2/orders/{order_id}", body=body)
+    return _delta_json_response(ok, status, resp_data)
 
 
 @app.route("/orders/cancel-all", methods=["POST"])
@@ -1107,6 +1154,14 @@ if __name__ == "__main__":
         threading.Thread(target=_heartbeat_loop, daemon=True).start()
         print(f"[heartbeat] auto-started: id={HEARTBEAT_ID}, ttl={HEARTBEAT_TTL_MS}ms, "
               f"interval={HEARTBEAT_INTERVAL_SEC}s")
+
+    # Security: warn loudly if running live with no API token protection.
+    if not DRY_RUN and not _DASHBOARD_API_TOKEN:
+        print("=" * 65)
+        print("  WARNING: LIVE MODE + No DASHBOARD_API_TOKEN configured!")
+        print("  All mutating routes (place-order, positions/close, etc.)")
+        print("  are UNPROTECTED. Set DASHBOARD_API_TOKEN in .env NOW.")
+        print("=" * 65)
 
     # debug=False: this process is bound to 0.0.0.0 and handles real API
     # keys -- Werkzeug's interactive debugger is a remote-code-execution

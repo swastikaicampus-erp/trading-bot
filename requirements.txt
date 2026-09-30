@@ -1,6 +1,6 @@
-flask
-flask-cors
-python-dotenv
-delta-rest-client
-requests
-websocket-client
+flask==3.1.3
+flask-cors==6.0.5
+python-dotenv==1.2.2
+delta-rest-client==1.0.14
+requests==2.34.2
+websocket-client==1.9.0
