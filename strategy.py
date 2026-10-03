@@ -54,29 +54,28 @@ DEFAULT_CONFIG = {
 
     # momentum filter -- LONG (widened band so momentum moves aren't instantly rejected)
     "rsi_period": 14,
-    "rsi_floor": 40,
-    "rsi_overbought": 75,
+    "rsi_floor": 35,
+    "rsi_overbought": 85,
 
     # momentum filter -- SHORT
-    "rsi_short_floor": 25,
-    "rsi_short_ceiling": 60,
+    "rsi_short_floor": 15,
+    "rsi_short_ceiling": 65,
 
-    # trend filter (ADX threshold 20 to ensure solid trend strength)
+    # trend filter (ADX threshold 12 to catch early trend formations)
     "adx_period": 14,
-    "adx_threshold": 20,
+    "adx_threshold": 12,
     "require_adx_rising": False,
 
     # microscopic EMA cross filter
-    "min_ema_separation_pct": 0.02,
+    "min_ema_separation_pct": 0.01,
 
-    # EMA cross lookback window (candles) — 1 = only the most-recent completed candle
-    # (set higher to allow a cross that happened N candles ago, still current-aligned)
-    "cross_lookback_candles": 1,
+    # EMA cross lookback window (candles) — 5 candles (25 mins on 5m chart)
+    "cross_lookback_candles": 5,
     "require_cross_confirmation": False,
 
-    # volume filter (1.1x = 10% above 20-period average)
+    # volume filter (0.0 = volume score used in ranking, not hard-rejecting trades)
     "volume_lookback": 20,
-    "volume_multiplier": 1.1,
+    "volume_multiplier": 0.0,
 
     # vwap filter
     "vwap_filter": True,
@@ -102,7 +101,7 @@ DEFAULT_CONFIG = {
 
     # direction control
     "allow_long": True,
-    "allow_short": False,
+    "allow_short": True,
 
     # symbol blacklist -- toxic or underperforming altcoins to skip
     "symbol_blacklist": [
@@ -118,8 +117,8 @@ DEFAULT_CONFIG = {
         "XRPUSD", "METAXUSD", "GOATUSD", "FILUSD",
     ],
 
-    # minimum score threshold -- only take high-confidence A+ setups
-    "min_score_threshold": 0.50,
+    # minimum score threshold -- balance quality and trade frequency
+    "min_score_threshold": 0.35,
 
     # portfolio-level limits (optimized for small $12 account)
     "max_trades_per_day": 8,
