@@ -239,14 +239,26 @@ def _place_order_for_strategy(order_body):
     product_id = order_body.get("product_id")
     order_id = order_body.get("id")
 
-    # If this is a bracket edit request (has bracket SL/TP fields, without size/side)
-    if ("bracket_stop_loss_price" in order_body or "bracket_take_profit_price" in order_body) and "size" not in order_body:
-        if not order_id:
-            return {"error": "Missing order_id for bracket update"}
-        ok, status, data = _signed_request("PUT", "/v2/orders/bracket", body=order_body)
-        if ok:
-            return data.get("result", data)
-        return {"error": _friendly_error(data).get("message") or str(data)}
+    # If this is an order edit request (has order_id and no side)
+    if order_id and "side" not in order_body:
+        if "bracket_stop_loss_price" in order_body or "bracket_take_profit_price" in order_body:
+            ok, status, data = _signed_request("PUT", "/v2/orders/bracket", body=order_body)
+            if ok:
+                return data.get("result", data)
+            # Fallback: if bracket PUT fails, try updating stop_price on standard order endpoint
+            stop_px = order_body.get("bracket_stop_loss_price") or order_body.get("stop_price")
+            if stop_px and product_id:
+                edit_body = {"id": order_id, "product_id": product_id, "stop_price": str(stop_px)}
+                ok2, status2, data2 = _signed_request("PUT", "/v2/orders", body=edit_body)
+                if ok2:
+                    return data2.get("result", data2)
+            return {"error": _friendly_error(data).get("message") or str(data)}
+        else:
+            # Direct stop order edit via PUT /v2/orders
+            ok, status, data = _signed_request("PUT", "/v2/orders", body=order_body)
+            if ok:
+                return data.get("result", data)
+            return {"error": _friendly_error(data).get("message") or str(data)}
 
     # Otherwise new order placement: soft-set leverage first ONLY for new entry orders (cached per product)
     if product_id and not DRY_RUN and not order_body.get("reduce_only"):

@@ -20,3 +20,11 @@ git pull origin main
 pm2 restart delta-service
 pm2 logs delta-service --lines 30
 
+# Live status + open positions
+curl http://localhost:5002/strategy/status
+
+# Latest PnL report
+python3 check_pnl.py
+
+# Real-time logs
+pm2 logs delta-service --lines 30

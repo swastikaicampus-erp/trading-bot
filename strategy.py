@@ -1503,9 +1503,50 @@ class StrategyManager:
                 if sl_order_id or tp_order_id:
                     logger.info("Fetched stop order ids for %s: SL_id=%s TP_id=%s", symbol, sl_order_id, tp_order_id)
                 else:
-                    logger.warning("No open stop orders found for %s after entry — internal monitor is sole protection", symbol)
+                    logger.info("No open bracket stop orders auto-created by Delta for %s after market entry fill", symbol)
             except Exception as e:
                 logger.warning("Could not fetch stop order ids for %s: %s", symbol, e)
+
+            # Fallback: If exchange bracket legs were not auto-created by Delta,
+            # explicitly place exchange-side Stop Loss and Take Profit stop orders now.
+            stop_side = "sell" if direction == "long" else "buy"
+            if not sl_order_id and self.place_order_fn:
+                try:
+                    sl_res = self.place_order_fn({
+                        "product_id": product_id,
+                        "size": qty,
+                        "side": stop_side,
+                        "order_type": "market_order",
+                        "stop_order_type": "stop_loss_order",
+                        "stop_price": str(sl_price),
+                        "reduce_only": True,
+                    })
+                    if isinstance(sl_res, dict) and not sl_res.get("error"):
+                        sl_order_id = _extract_order_id(sl_res)
+                        logger.info("Placed exchange SL stop order for %s at %s, id=%s", symbol, sl_price, sl_order_id)
+                    else:
+                        logger.warning("Could not place exchange SL stop for %s: %s", symbol, sl_res)
+                except Exception as ex:
+                    logger.warning("Exception placing exchange SL stop for %s: %s", symbol, ex)
+
+            if not tp_order_id and self.place_order_fn:
+                try:
+                    tp_res = self.place_order_fn({
+                        "product_id": product_id,
+                        "size": qty,
+                        "side": stop_side,
+                        "order_type": "market_order",
+                        "stop_order_type": "take_profit_order",
+                        "stop_price": str(tp_price),
+                        "reduce_only": True,
+                    })
+                    if isinstance(tp_res, dict) and not tp_res.get("error"):
+                        tp_order_id = _extract_order_id(tp_res)
+                        logger.info("Placed exchange TP stop order for %s at %s, id=%s", symbol, tp_price, tp_order_id)
+                    else:
+                        logger.warning("Could not place exchange TP stop for %s: %s", symbol, tp_res)
+                except Exception as ex:
+                    logger.warning("Exception placing exchange TP stop for %s: %s", symbol, ex)
 
         with self.lock:
             # FIX: Generate a unique trade_id per trade lifecycle.
@@ -1721,6 +1762,7 @@ class StrategyManager:
                             "id": sl_oid,
                             "product_id": product_id,
                             "bracket_stop_loss_price": str(new_sl),
+                            "stop_price": str(new_sl),
                         }
                         logger.info("Sending break-even SL update for %s via stop order %s", symbol, sl_oid)
                         res = self.place_order_fn(order_body)
@@ -1810,6 +1852,7 @@ class StrategyManager:
                             "id": sl_oid,
                             "product_id": product_id,
                             "bracket_stop_loss_price": str(updated_sl),
+                            "stop_price": str(updated_sl),
                         }
                         res = self.place_order_fn(order_body)
                         if isinstance(res, dict) and (res.get("error") or self._order_looks_rejected(res)):
