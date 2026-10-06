@@ -329,11 +329,13 @@ def _sync_capital_from_balance():
                             except (TypeError, ValueError):
                                 pass
             if max_bal > 0:
+                old_cap = strategy.config.get("capital")
                 strategy.config["capital"] = max_bal
-                print(f"[startup] strategy capital set from balance: {max_bal}")
+                if old_cap is None or abs(old_cap - max_bal) > 0.01:
+                    print(f"[balance-sync] strategy capital updated from balance: {max_bal:.4f}")
                 return
     except Exception as e:
-        print(f"[startup] could not sync capital from balance: {e}")
+        print(f"[balance-sync] could not sync capital from balance: {e}")
 
 
 _sync_capital_from_balance()

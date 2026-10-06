@@ -1,8 +1,9 @@
 cd /var/www/delta-service
-nano check_pnl.py
-
-
 python3 check_pnl.py
+
+
+
+nano check_pnl.py
 
 
 pm2 logs delta-service --lines 50
