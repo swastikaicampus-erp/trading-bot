@@ -39,6 +39,7 @@ import json
 import logging
 import threading
 import uuid
+from collections import defaultdict
 from math import log10, floor
 from datetime import datetime, timezone, timedelta
 
@@ -61,9 +62,9 @@ DEFAULT_CONFIG = {
     "rsi_short_floor": 15,
     "rsi_short_ceiling": 65,
 
-    # trend filter (ADX threshold 12 to catch early trend formations)
+    # trend filter (ADX threshold 16 for stronger trend confirmation)
     "adx_period": 14,
-    "adx_threshold": 12,
+    "adx_threshold": 16,
     "require_adx_rising": False,
 
     # microscopic EMA cross filter
@@ -88,13 +89,13 @@ DEFAULT_CONFIG = {
     # --- stop / target ---------------------------------------------------
     # fixed-% fallback (used when use_atr_stops is False or ATR unavailable)
     "stop_loss_pct": 1.2,
-    "target_pct": 3.6,
+    "target_pct": 4.2,
 
-    # ATR-based stops -- per-symbol volatility instead of fixed %
+    # ATR-based stops -- per-symbol volatility instead of fixed % (4.2x TP gives 3.5:1 RR)
     "use_atr_stops": True,
     "atr_period": 14,
     "atr_sl_mult": 1.2,
-    "atr_tp_mult": 3.6,
+    "atr_tp_mult": 4.2,
 
     # fees (Delta India taker ~0.05% each side -> ~0.10% round trip)
     "fee_rate_round_trip": 0.0010,
@@ -105,7 +106,7 @@ DEFAULT_CONFIG = {
 
     # symbol blacklist -- toxic or underperforming altcoins to skip
     "symbol_blacklist": [
-        "LINKUSD", "ETHUSD", "DOGEUSD", "SAGAUSD", "PENDLEUSD", "BCHUSD", "POPCATUSD", "NEARUSD",
+        "BASEDUSD", "LINKUSD", "ETHUSD", "DOGEUSD", "SAGAUSD", "PENDLEUSD", "BCHUSD", "POPCATUSD", "NEARUSD",
         "LTCUSD", "ARMBUSD", "BILLUSD", "REDUSD", "SPXUSD", "SUSHIUSD", "1000BONKUSD", "WDCBUSD",
         "XMRUSD", "TRXUSD", "RIVERUSD", "SKHYBUSD", "RKLBBUSD", "AMZNXUSD", "TRUMPUSD", "PAXGUSD",
         "ZROUSD", "SLVONUSD", "SPYXUSD", "AVAAIUSD", "LABUSD", "BEATUSD", "POLUSD", "ARCUSD",
@@ -123,6 +124,8 @@ DEFAULT_CONFIG = {
     # portfolio-level limits (optimized for small $12 account)
     "max_trades_per_day": 8,
     "max_concurrent_trades": 2,
+    "max_daily_trades_per_symbol": 2,
+    "max_daily_losses_per_symbol": 2,
     # Absolute dollar loss circuit-breaker (legacy, for small accounts)
     "max_daily_loss": 5,
     # Percentage-of-capital circuit-breaker (takes precedence when set > 0)
@@ -136,8 +139,8 @@ DEFAULT_CONFIG = {
     "monitor_interval_sec": 10,
     "failed_retry_cooldown_sec": 1800,
 
-    # post-exit cooldown (seconds)
-    "post_exit_cooldown_sec": 300,
+    # post-exit cooldown (seconds) -- 1 hour (3600s) to prevent immediate re-entry loops
+    "post_exit_cooldown_sec": 3600,
 
     # Break-Even Stop Loss
     "enable_breakeven_sl": True,
@@ -194,6 +197,7 @@ EDITABLE_CONFIG_KEYS = [
     "allow_long", "allow_short", "symbol_blacklist",
     "min_score_threshold",
     "max_trades_per_day", "max_concurrent_trades",
+    "max_daily_trades_per_symbol", "max_daily_losses_per_symbol",
     "max_daily_loss", "max_daily_loss_pct", "recovered_max_hold_sec",
     "scan_interval_sec", "monitor_interval_sec",
     "failed_retry_cooldown_sec", "post_exit_cooldown_sec", "dry_run_max_hold_sec",
@@ -755,6 +759,8 @@ class StrategyManager:
         self.open_trades = {}
         self.failed_symbols = {}
         self.trades_today = 0
+        self.symbol_trades_today = defaultdict(int)
+        self.symbol_losses_today = defaultdict(int)
         self.realized_pnl_today = 0.0
         self.circuit_broken = False
         self.btc_crash_active = False
@@ -802,8 +808,10 @@ class StrategyManager:
         "target_pct":             (0.3,  15.0),
         "atr_sl_mult":            (0.5,  5.0),
         "atr_tp_mult":            (0.5,  10.0),
-        "max_trades_per_day":     (1,    20),
-        "max_concurrent_trades": (1,    5),
+        "max_trades_per_day":          (1,    20),
+        "max_concurrent_trades":      (1,    5),
+        "max_daily_trades_per_symbol": (1,    5),
+        "max_daily_losses_per_symbol": (1,    5),
         "min_score_threshold":    (0.0,  1.0),
         "adx_threshold":          (10,   50),
         "volume_multiplier":      (0.5,  5.0),
@@ -837,6 +845,8 @@ class StrategyManager:
         if today != self.day_marker:
             self.day_marker = today
             self.trades_today = 0
+            self.symbol_trades_today.clear()
+            self.symbol_losses_today.clear()
             self.realized_pnl_today = 0.0
             self.circuit_broken = False
             # Refresh capital baseline from live equity at day-start so circuit
@@ -1245,12 +1255,20 @@ class StrategyManager:
             scan_snapshot = dict(self.last_scan)
 
         candidates = []
+        max_sym_trades = self.config.get("max_daily_trades_per_symbol", 2)
+        max_sym_losses = self.config.get("max_daily_losses_per_symbol", 2)
+
         for symbol, diag in scan_snapshot.items():
             if not diag.get("qualifies"):
                 continue
             if diag.get("score", 0) < min_score:
                 continue
             if symbol in open_symbols or symbol in cooling_down:
+                continue
+            # Per-symbol max daily trades and max daily losses lockout
+            if self.symbol_trades_today[symbol] >= max_sym_trades:
+                continue
+            if self.symbol_losses_today[symbol] >= max_sym_losses:
                 continue
             # 1. BTC Flash Crash Protection: pause LONG entries when BTC dumps
             if btc_crash and diag.get("direction") == "long":
@@ -2125,6 +2143,9 @@ class StrategyManager:
         pnl = self._pnl_for_trade(trade, exit_price)
         with self.lock:
             self.realized_pnl_today += pnl
+            self.symbol_trades_today[symbol] += 1
+            if pnl < 0:
+                self.symbol_losses_today[symbol] += 1
             self.open_trades.pop(symbol, None)
             # FIX: Use same loss-limit logic as _scan_loop — max_daily_loss_pct
             # (% of capital) takes precedence over absolute max_daily_loss.
