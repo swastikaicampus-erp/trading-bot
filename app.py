@@ -53,7 +53,7 @@ _DASHBOARD_API_TOKEN = os.getenv("DASHBOARD_API_TOKEN", "")
 
 # Paths exempt from auth even when token is configured
 _AUTH_SAFE_PATHS = {
-    "/health", "/system/status", "/rate-limit",
+    "/health", "/system/status", "/strategy/status", "/rate-limit",
     "/candles", "/ticker", "/tickers", "/products", "/watchlist",
 }
 
