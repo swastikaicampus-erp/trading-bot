@@ -558,7 +558,7 @@ class MarketDataFeed:
                 }
 
         elif msg_type.startswith("candlestick_"):
-            raw_time = msg.get("candle_start_time", msg.get("timestamp"))
+            raw_time = msg.get("time") or msg.get("candle_start_time") or msg.get("timestamp")
             if raw_time is None:
                 return
             candle_time = _norm_ts(raw_time)

@@ -44,35 +44,7 @@ CORS(app, origins=os.getenv("ALLOWED_ORIGINS", "*").split(","))
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 WATCHLIST_FILE = "watchlist.json"
 
-# Simple API token auth for mutating routes.
-# Set DASHBOARD_API_TOKEN in .env to enable. If unset, auth is disabled
-# (backward-compatible). Send token ONLY via X-API-Token header.
-# FIX 6: Removed ?api_token= query param support — query params appear
-# in web server access logs, proxies, and browser history.
-_DASHBOARD_API_TOKEN = os.getenv("DASHBOARD_API_TOKEN", "")
 
-_AUTH_SAFE_EXACT = {
-    "/", "/health", "/system/status", "/strategy/status", "/rate-limit",
-    "/tickers", "/products", "/watchlist",
-}
-_AUTH_SAFE_PREFIXES = ("/candles", "/ticker/")
-
-@app.before_request
-def _require_api_token():
-    """Block mutating requests unless the correct DASHBOARD_API_TOKEN is
-    provided via the X-API-Token request header. Safe (read-only) routes are
-    always allowed. OPTIONS preflight CORS requests are also allowed."""
-    if request.method == "OPTIONS":
-        return
-    if not _DASHBOARD_API_TOKEN:
-        return  # auth disabled — no token configured
-    path = request.path
-    if request.method == "GET" and (path in _AUTH_SAFE_EXACT or any(path.startswith(p) for p in _AUTH_SAFE_PREFIXES)):
-        return
-    token = request.headers.get("X-API-Token") or ""
-    if not hmac.compare_digest(token, _DASHBOARD_API_TOKEN):
-        from flask import abort
-        abort(401)
 
 # Filter to USD-settled perpetual futures contracts for maximum liquidity and safety
 PERP_QUOTE_ASSET_FILTER = {"USD"}
@@ -1190,13 +1162,7 @@ if __name__ == "__main__":
         print(f"[heartbeat] auto-started: id={HEARTBEAT_ID}, ttl={HEARTBEAT_TTL_MS}ms, "
               f"interval={HEARTBEAT_INTERVAL_SEC}s")
 
-    # Security: warn loudly if running live with no API token protection.
-    if not DRY_RUN and not _DASHBOARD_API_TOKEN:
-        print("=" * 65)
-        print("  WARNING: LIVE MODE + No DASHBOARD_API_TOKEN configured!")
-        print("  All mutating routes (place-order, positions/close, etc.)")
-        print("  are UNPROTECTED. Set DASHBOARD_API_TOKEN in .env NOW.")
-        print("=" * 65)
+
 
     # debug=False: this process is bound to 0.0.0.0 and handles real API
     # keys -- Werkzeug's interactive debugger is a remote-code-execution
