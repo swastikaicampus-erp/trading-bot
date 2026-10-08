@@ -144,7 +144,11 @@ DEFAULT_CONFIG = {
 
     # Break-Even Stop Loss
     "enable_breakeven_sl": True,
-    "breakeven_trigger_pct": 1.0,
+    "breakeven_trigger_pct": 1.5,
+
+    # Bid-Ask Spread Filter -- reject entries if spread exceeds max threshold (%)
+    "enable_spread_filter": True,
+    "max_spread_pct": 0.15,
 
     # Dynamic Trailing Stop Loss
     "enable_trailing_sl": True,
@@ -1273,6 +1277,19 @@ class StrategyManager:
             # 1. BTC Flash Crash Protection: pause LONG entries when BTC dumps
             if btc_crash and diag.get("direction") == "long":
                 continue
+
+            # 2. Bid-Ask Spread Filter: reject candidate if spread exceeds max_spread_pct
+            if self.config.get("enable_spread_filter", True):
+                max_spread = self.config.get("max_spread_pct", 0.15)
+                t = self.feed.ticker.get(symbol) if self.feed and self.feed.ticker else None
+                if t:
+                    bid = t.get("bid") or 0.0
+                    ask = t.get("ask") or 0.0
+                    if bid > 0 and ask > 0 and ask >= bid:
+                        spread_pct = ((ask - bid) / bid) * 100.0
+                        if spread_pct > max_spread:
+                            continue
+
             candidates.append(diag)
 
         if not candidates:

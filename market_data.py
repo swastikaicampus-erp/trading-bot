@@ -1,3 +1,4 @@
+import os
 import json
 import time
 import socket
@@ -55,12 +56,17 @@ def _safe_float(val, default=0.0):
         return default
 
 
-def discover_perpetual_futures_symbols(quote_assets={"USD"}, max_symbols=60):
+def discover_perpetual_futures_symbols(quote_assets={"USD"}, max_symbols=None):
     """
     Delta ke /v2/products se LIVE perpetual futures symbols nikalta hai,
-    24h volume/turnover ke basis par sort karke Top `max_symbols` (default 60)
+    24h volume/turnover ke basis par sort karke Top `max_symbols` (default 30 or MAX_SYMBOLS env)
     most liquid contracts return karta hai.
     """
+    if max_symbols is None:
+        try:
+            max_symbols = int(os.getenv("MAX_SYMBOLS", "30"))
+        except (TypeError, ValueError):
+            max_symbols = 30
     resp = requests.get(f"{REST_BASE}/v2/products", timeout=15)
     resp.raise_for_status()
     rows = resp.json().get("result", [])
@@ -301,13 +307,11 @@ class MarketDataFeed:
                 with self._ws_lock:
                     self._ws = ws
                     self._connect_count += 1  # FIX: increment before on_open fires
-                # ping_interval=30: send WS ping every 30s (was 20).
-                # ping_timeout=20:  allow 20s for pong reply (was 15).
+                # ping_interval=45: send WS ping every 45s (was 30).
+                # ping_timeout=30:  allow 30s for pong reply (was 20).
                 # Delta India servers have variable latency from VPS environments.
-                # Aggressive pings (20s/15s) caused frequent false "ping/pong timed out"
-                # disconnects when the server was slow but not actually dead.
-                # 30s/20s gives enough breathing room without losing liveness detection.
-                ws.run_forever(ping_interval=30, ping_timeout=20)
+                # 45s/30s prevents false ping/pong timeouts over volatile market periods.
+                ws.run_forever(ping_interval=45, ping_timeout=30)
             except Exception as e:
                 print(f"[market_data] ws crashed: {e}")
             with self._ws_lock:
@@ -491,6 +495,8 @@ class MarketDataFeed:
                     "high": msg.get("high"),
                     "low": msg.get("low"),
                     "volume": msg.get("volume"),
+                    "bid": _safe_float(msg.get("best_bid", msg.get("bid"))),
+                    "ask": _safe_float(msg.get("best_ask", msg.get("ask"))),
                     "funding_rate": _safe_float(funding_val),
                     "timestamp": msg.get("timestamp"),
                 }

@@ -88,7 +88,10 @@ client = DeltaRestClient(
 )
 
 
-MAX_WATCHLIST_CAP = 60
+try:
+    MAX_WATCHLIST_CAP = int(os.getenv("MAX_SYMBOLS", "30"))
+except (TypeError, ValueError):
+    MAX_WATCHLIST_CAP = 30
 
 
 def _load_or_discover_watchlist():
