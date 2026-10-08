@@ -1473,7 +1473,8 @@ class StrategyManager:
         # Live margin pre-flight check to prevent insufficient_margin API rejections
         if avail_bal is not None and avail_bal > 0 and notional_per_contract > 0:
             max_concurrent = max(self.config.get("max_concurrent_trades", 3), 1)
-            avail_margin_for_trade = avail_bal / max_concurrent
+            # Apply 0.95 factor (5% fee/commission buffer) to prevent insufficient_commission errors
+            avail_margin_for_trade = (avail_bal / max_concurrent) * 0.95
             effective_lev = min(
                 self.config.get("max_leverage", 3),
                 product_max_lev or self.config.get("max_leverage", 3)
