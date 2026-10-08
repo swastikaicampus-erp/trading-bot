@@ -513,7 +513,7 @@ class MarketDataFeed:
         elif msg_type in ("heartbeat", "pong", "enable_heartbeat", "subscriptions"):
             return
 
-        symbol = msg.get("symbol")
+        symbol = msg.get("symbol") or msg.get("sy")
         if not symbol or symbol not in self.candles:
             return
 
@@ -545,36 +545,53 @@ class MarketDataFeed:
                 if ask_val is None:
                     ask_val = quotes.get("best_ask", quotes.get("ask"))
 
+                d_list = msg.get("d", [])
+                d_item = d_list[0] if isinstance(d_list, list) and d_list else {}
+                
+                if d_item:
+                    mark_price = d_item.get("m")
+                    q = d_item.get("q", [])
+                    if len(q) >= 1: bid_val = q[0]
+                    if len(q) >= 3: ask_val = q[2]
+                    ohlc = d_item.get("ohlc", [])
+                    close_val = ohlc[3] if len(ohlc) >= 4 else msg.get("sp")
+                    high_val = ohlc[1] if len(ohlc) >= 2 else None
+                    low_val = ohlc[2] if len(ohlc) >= 3 else None
+                    vol_val = None
+                    ts = msg.get("ts")
+                else:
+                    mark_price = msg.get("mark_price")
+                    close_val = msg.get("close")
+                    high_val = msg.get("high")
+                    low_val = msg.get("low")
+                    vol_val = msg.get("volume")
+                    ts = msg.get("timestamp")
+
                 self.ticker[symbol] = {
-                    "close": msg.get("close"),
-                    "mark_price": msg.get("mark_price"),
-                    "high": msg.get("high"),
-                    "low": msg.get("low"),
-                    "volume": msg.get("volume"),
+                    "close": _safe_float(close_val),
+                    "mark_price": _safe_float(mark_price),
+                    "high": _safe_float(high_val),
+                    "low": _safe_float(low_val),
+                    "volume": _safe_float(vol_val),
                     "bid": _safe_float(bid_val),
                     "ask": _safe_float(ask_val),
                     "funding_rate": _safe_float(funding_val) if funding_val is not None else None,
-                    "timestamp": msg.get("timestamp"),
+                    "timestamp": ts,
                 }
 
         elif msg_type.startswith("candlestick_"):
-            raw_time = msg.get("time") or msg.get("candle_start_time") or msg.get("timestamp")
+            raw_time = msg.get("time") or msg.get("candle_start_time") or msg.get("timestamp") or msg.get("cst") or msg.get("ts")
             if raw_time is None:
                 return
             candle_time = _norm_ts(raw_time)
 
             candle = {
                 "time": candle_time,
-                # CHANGED: float(msg.get("open", 0)) -> _safe_float(msg.get("open"))
-                # Root cause: when Delta sends a field as an explicit null
-                # (key present, value None), dict.get's default does NOT
-                # kick in (it only applies when the key is missing), so
-                # float(None) was raised here uncaught.
-                "open": _safe_float(msg.get("open")),
-                "high": _safe_float(msg.get("high")),
-                "low": _safe_float(msg.get("low")),
-                "close": _safe_float(msg.get("close")),
-                "volume": _safe_float(msg.get("volume")),
+                "open": _safe_float(msg.get("open") if msg.get("open") is not None else msg.get("o")),
+                "high": _safe_float(msg.get("high") if msg.get("high") is not None else msg.get("h")),
+                "low": _safe_float(msg.get("low") if msg.get("low") is not None else msg.get("l")),
+                "close": _safe_float(msg.get("close") if msg.get("close") is not None else msg.get("c")),
+                "volume": _safe_float(msg.get("volume") if msg.get("volume") is not None else msg.get("v")),
             }
             with self._lock:
                 series = self.candles.get(symbol)
