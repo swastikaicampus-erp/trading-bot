@@ -26,6 +26,19 @@ RESOLUTION          = "1m"   # candle timeframe
 BACKFILL_MINUTES    = 200    # past candles to preload per symbol
 SUBSCRIBE_CHUNK_SIZE = 25   # small chunks to avoid oversized WS frames
 
+# Derive candle period in seconds from RESOLUTION so _norm_ts bucket-rounding
+# stays correct if the timeframe is ever changed (e.g. "1m"→60, "5m"→300, "1h"→3600).
+def _parse_resolution_sec(res: str) -> int:
+    try:
+        if res.endswith("m"):
+            return int(res[:-1]) * 60
+        if res.endswith("h"):
+            return int(res[:-1]) * 3600
+    except (ValueError, AttributeError):
+        pass
+    return 60  # safe fallback
+_RESOLUTION_SEC = _parse_resolution_sec(RESOLUTION)
+
 # ---------------------------------------------------------------------------
 # NETWORK: Force IPv4 for all outbound connections (REST + WebSocket).
 # Delta India servers can be unstable on IPv6 paths from VPS environments,
@@ -108,6 +121,17 @@ def discover_perpetual_futures_symbols(quote_assets={"USD"}, max_symbols=None):
     return sorted([c[0] for c in candidates])
 
 
+def _norm_ts(t):
+    try:
+        t = int(float(t))
+        if t > 10**17:   t //= 10**9
+        elif t > 10**14: t //= 10**6
+        elif t > 10**11: t //= 10**3
+        return t - (t % _RESOLUTION_SEC)
+    except (TypeError, ValueError):
+        return t
+
+
 def _chunks(items, size):
     for i in range(0, len(items), size):
         yield items[i:i + size]
@@ -139,6 +163,7 @@ class MarketDataFeed:
         self._running = False
         self._connect_count = 0             # track reconnections for partial re-backfill
         self._backfill_in_progress = threading.Event()  # guard against overlapping reconnect backfills
+        self._last_msg_ts = time.time()
 
     # ---------- public read API ----------
 
@@ -287,6 +312,20 @@ class MarketDataFeed:
         self._running = True
         self.backfill()
         threading.Thread(target=self._run_forever, daemon=True).start()
+        threading.Thread(target=self._watchdog_loop, daemon=True).start()
+
+    def _watchdog_loop(self):
+        while self._running:
+            time.sleep(15)
+            if self._last_msg_ts and (time.time() - self._last_msg_ts > 60):
+                with self._ws_lock:
+                    ws = self._ws
+                if ws:
+                    print("[market_data] Watchdog: No WS message received for >60s! Forcing WS reconnect...")
+                    try:
+                        ws.close()
+                    except Exception:
+                        pass
 
     def stop(self):
         self._running = False
@@ -448,6 +487,7 @@ class MarketDataFeed:
             print(f"[market_data] on_message error (ignored, feed continues): {e}")
 
     def _handle_message(self, ws, message):
+        self._last_msg_ts = time.time()
         try:
             msg = json.loads(message)
         except Exception:
@@ -489,29 +529,31 @@ class MarketDataFeed:
                         )
                     )
                 )
+                quotes = msg.get("quotes") if isinstance(msg.get("quotes"), dict) else {}
+                bid_val = msg.get("best_bid", msg.get("bid"))
+                if bid_val is None:
+                    bid_val = quotes.get("best_bid", quotes.get("bid"))
+                ask_val = msg.get("best_ask", msg.get("ask"))
+                if ask_val is None:
+                    ask_val = quotes.get("best_ask", quotes.get("ask"))
+
                 self.ticker[symbol] = {
                     "close": msg.get("close"),
                     "mark_price": msg.get("mark_price"),
                     "high": msg.get("high"),
                     "low": msg.get("low"),
                     "volume": msg.get("volume"),
-                    "bid": _safe_float(msg.get("best_bid", msg.get("bid"))),
-                    "ask": _safe_float(msg.get("best_ask", msg.get("ask"))),
-                    "funding_rate": _safe_float(funding_val),
+                    "bid": _safe_float(bid_val),
+                    "ask": _safe_float(ask_val),
+                    "funding_rate": _safe_float(funding_val) if funding_val is not None else None,
                     "timestamp": msg.get("timestamp"),
                 }
 
         elif msg_type.startswith("candlestick_"):
-            candle_time = msg.get("candle_start_time", msg.get("timestamp"))
-            if candle_time is None:
+            raw_time = msg.get("candle_start_time", msg.get("timestamp"))
+            if raw_time is None:
                 return
-            try:
-                candle_time = int(candle_time)
-            except (TypeError, ValueError):
-                try:
-                    candle_time = int(float(candle_time))
-                except (TypeError, ValueError):
-                    pass
+            candle_time = _norm_ts(raw_time)
 
             candle = {
                 "time": candle_time,

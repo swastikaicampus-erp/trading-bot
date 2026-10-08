@@ -236,6 +236,7 @@ def _delta_json_response(ok, status_code, data):
     return jsonify({"success": False, "error": _friendly_error(data)}), status_code if status_code >= 400 else 400
 
 _SET_LEVERAGE_CACHE = {}
+_SET_LEVERAGE_LOCK = threading.Lock()
 
 def _place_order_for_strategy(order_body):
     """Strategy entry / update path: routes standalone stop edits to PUT /v2/orders, bracket entries to POST /v2/orders."""
@@ -281,13 +282,16 @@ def _place_order_for_strategy(order_body):
                     lev = min(lev, int(float(p_max_lev)))
                 except (TypeError, ValueError):
                     pass
-            if _SET_LEVERAGE_CACHE.get(product_id) != lev:
+            with _SET_LEVERAGE_LOCK:
+                needs_update = _SET_LEVERAGE_CACHE.get(product_id) != lev
+            if needs_update:
                 _signed_request(
                     "POST",
                     f"/v2/products/{product_id}/orders/leverage",
                     body={"leverage": lev},
                 )
-                _SET_LEVERAGE_CACHE[product_id] = lev
+                with _SET_LEVERAGE_LOCK:
+                    _SET_LEVERAGE_CACHE[product_id] = lev
         except Exception as e:
             print(f"[strategy] leverage set failed for product {product_id}: {e}")
 
@@ -310,8 +314,15 @@ strategy = StrategyManager(
 )
 
 
-def _sync_capital_from_balance():
-    """Best-effort: wallet available balance → strategy capital (risk sizing)."""
+_last_cap_sync = 0.0
+
+def _sync_capital_from_balance(force=False):
+    """Best-effort: wallet available balance → strategy capital (risk sizing).
+    Includes a 20s throttle to avoid spamming signed REST requests on status polling."""
+    global _last_cap_sync
+    if not force and time.time() - _last_cap_sync < 20:
+        return
+    _last_cap_sync = time.time()
     try:
         ok, status, bal = _signed_request("GET", "/v2/wallet/balances")
         if not ok:
@@ -319,28 +330,23 @@ def _sync_capital_from_balance():
         rows = bal.get("result", bal) if isinstance(bal, dict) else bal
         if isinstance(rows, dict):
             rows = [rows]
-        if isinstance(rows, list):
-            found_bal = None
-            for row in rows:
-                if isinstance(row, dict):
-                    # Priority order: available_balance first, then available, then balance (never equity)
-                    for key in ("available_balance", "available", "balance"):
-                        val = row.get(key)
-                        if val is not None:
-                            try:
-                                v = float(val)
-                                if v > 0:
-                                    found_bal = v
-                                    break
-                            except (TypeError, ValueError):
-                                pass
-                    if found_bal is not None:
-                        break
-            if found_bal is not None and found_bal > 0:
+        for row in (rows or []):
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("asset_symbol") or "").upper() not in ("USD", "USDT"):
+                continue
+            for key in ("available_balance", "available"):
+                val = row.get(key)
+                if val is None:
+                    continue
+                try:
+                    found = float(val)
+                except (TypeError, ValueError):
+                    continue
                 old_cap = strategy.config.get("capital")
-                strategy.config["capital"] = found_bal
-                if old_cap is None or abs(old_cap - found_bal) > 0.01:
-                    print(f"[balance-sync] strategy capital updated from balance: {found_bal:.4f}")
+                strategy.config["capital"] = found
+                if old_cap is None or abs(old_cap - found) > 0.01:
+                    print(f"[balance-sync] strategy capital updated from balance: {found:.4f}")
                 return
     except Exception as e:
         print(f"[balance-sync] could not sync capital from balance: {e}")
@@ -1086,10 +1092,15 @@ def add_to_watchlist():
 @app.route("/watchlist/<symbol>", methods=["DELETE"])
 def remove_from_watchlist(symbol):
     symbol = symbol.upper()
+    with strategy.lock:
+        in_trade = symbol in strategy.open_trades
+    if in_trade:
+        return jsonify({"success": False, "error": f"Cannot remove {symbol} while an open trade exists"}), 400
     removed = feed.remove_symbol(symbol)
     if not removed:
         return jsonify({"success": False, "error": f"{symbol} not in watchlist"}), 404
 
+    strategy.remove_symbols([symbol])
     _save_watchlist()
     return jsonify({"success": True, "data": feed.get_symbols()})
 

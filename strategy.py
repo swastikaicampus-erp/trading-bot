@@ -41,6 +41,9 @@ import threading
 import uuid
 from collections import defaultdict
 from math import log10, floor
+from decimal import Decimal, ROUND_HALF_UP
+import requests
+from market_data import REST_BASE, _RESOLUTION_SEC
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger("delta-strategy-engine")
@@ -336,6 +339,20 @@ def _smart_round(price, sig_digits=5):
     return round(price, max(decimals, 2))
 
 
+def _round_to_tick(price, tick):
+    if price is None:
+        return None
+    if not tick:
+        return _smart_round(price)
+    try:
+        p_dec = Decimal(str(price))
+        t_dec = Decimal(str(tick))
+        rounded = (p_dec / t_dec).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * t_dec
+        return float(rounded)
+    except Exception:
+        return _smart_round(price)
+
+
 # ---------------------------------------------------------------------
 # product info
 # ---------------------------------------------------------------------
@@ -389,10 +406,16 @@ def resolve_product_info(client, symbols, use_cache=True):
                     except (TypeError, ValueError):
                         pass
 
+            try:
+                tick_size = float(row.get("tick_size") or 0) or None
+            except (TypeError, ValueError):
+                tick_size = None
+
             by_symbol[row["symbol"].upper()] = {
                 "product_id": row.get("id"),
                 "contract_value": contract_value,
                 "max_leverage": max_leverage,   # ADDED
+                "tick_size": tick_size,
             }
         for sym in missing:
             info = by_symbol.get(sym.upper())
@@ -412,42 +435,6 @@ def resolve_product_info(client, symbols, use_cache=True):
     return {s: resolved[s] for s in symbols if s in resolved}
 
 
-def resample_candles_1h(candles):
-    """Aggregates sub-hourly candles (5m/15m) into 1-Hour candles for HTF trend analysis."""
-    if not candles:
-        return []
-    hourly = []
-    curr_hour = None
-    cur_c = None
-    for c in candles:
-        t = c.get("time")
-        if t is None:
-            continue
-        try:
-            ts = int(t) if isinstance(t, (int, float)) else int(datetime.fromisoformat(str(t)).timestamp())
-        except Exception:
-            continue
-        hour_ts = (ts // 3600) * 3600
-        if hour_ts != curr_hour:
-            if cur_c is not None:
-                hourly.append(cur_c)
-            curr_hour = hour_ts
-            cur_c = {
-                "time": hour_ts,
-                "open": c["open"],
-                "high": c["high"],
-                "low": c["low"],
-                "close": c["close"],
-                "volume": c.get("volume", 0),
-            }
-        else:
-            cur_c["high"] = max(cur_c["high"], c["high"])
-            cur_c["low"] = min(cur_c["low"], c["low"])
-            cur_c["close"] = c["close"]
-            cur_c["volume"] += c.get("volume", 0)
-    if cur_c is not None:
-        hourly.append(cur_c)
-    return hourly
 
 def _today_vwap_with_bands(candles, max_std_dev=1.5):
     today = datetime.now(timezone.utc).date()
@@ -481,6 +468,32 @@ def _today_vwap_with_bands(candles, max_std_dev=1.5):
 def _today_vwap(candles):
     vwap, _, _ = _today_vwap_with_bands(candles)
     return vwap
+
+
+_htf_cache = {}
+_htf_cache_lock = threading.Lock()
+
+
+def fetch_htf_closes(symbol, bars=80, ttl=300):
+    with _htf_cache_lock:
+        hit = _htf_cache.get(symbol)
+        if hit and time.time() - hit[0] < ttl:
+            return hit[1]
+    end = int(time.time())
+    try:
+        r = requests.get(
+            f"{REST_BASE}/v2/history/candles",
+            params={"symbol": symbol, "resolution": "1h", "start": end - bars * 3600, "end": end},
+            timeout=8,
+        )
+        r.raise_for_status()
+        rows = sorted(r.json().get("result", []), key=lambda c: c.get("time", 0))
+        closes = [float(c["close"]) for c in rows[:-1] if c.get("close") is not None]  # drop forming bar
+    except Exception:
+        closes = []
+    with _htf_cache_lock:
+        _htf_cache[symbol] = (time.time(), closes)
+    return closes
 
 
 def compute_diagnostics(symbol, candles, config):
@@ -626,16 +639,17 @@ def compute_diagnostics(symbol, candles, config):
     volume_ok = (not recent_vols) or volume_ratio >= config["volume_multiplier"]
 
     htf_long_ok, htf_short_ok = True, True
-    if config.get("require_htf_trend", True):
-        h_candles = resample_candles_1h(candles)
-        h_slow_p = config.get("htf_ema_slow", 50)
-        if len(h_candles) >= h_slow_p:
-            h_closes = [c["close"] for c in h_candles]
+    if config.get("require_htf_trend", True) and (fresh_cross_up or fresh_cross_down):
+        p = config.get("htf_ema_slow", 50)
+        h_closes = fetch_htf_closes(symbol, bars=p + 30)
+        if len(h_closes) >= p:
             h_fast = ema(h_closes, config.get("htf_ema_fast", 20))
-            h_slow = ema(h_closes, h_slow_p)
+            h_slow = ema(h_closes, p)
             if h_fast and h_slow and len(h_fast) > 0 and len(h_slow) > 0:
-                htf_long_ok = h_fast[-1] > h_slow[-1] and h_closes[-1] > h_slow[-1]
-                htf_short_ok = h_fast[-1] < h_slow[-1] and h_closes[-1] < h_slow[-1]
+                htf_long_ok = h_fast[-1] > h_slow[-1] and curr_price > h_slow[-1]
+                htf_short_ok = h_fast[-1] < h_slow[-1] and curr_price < h_slow[-1]
+        else:
+            htf_long_ok = htf_short_ok = False
 
     long_qualifies = bool(
         config.get("allow_long", True)
@@ -773,6 +787,10 @@ class StrategyManager:
         self.last_scan = {}
         self.trade_log = []
 
+    def _rt(self, symbol, price):
+        tick = (self.product_info.get(symbol) or {}).get("tick_size")
+        return _round_to_tick(price, tick)
+
     # -- lifecycle -----------------------------------------------------
     def start(self, symbol=None):
         with self.lock:
@@ -803,6 +821,15 @@ class StrategyManager:
         info = resolve_product_info(self.client, new_syms)
         self.product_info.update(info)
 
+    def remove_symbols(self, symbols):
+        with self.lock:
+            for s in symbols:
+                if s in self.open_trades:
+                    continue
+                if s in self.symbols:
+                    self.symbols.remove(s)
+                self.last_scan.pop(s, None)
+
     # Safe value ranges for editable config keys.
     # These prevent dangerous API calls from setting e.g. risk_pct=100
     # or max_leverage=200 which would cause immediate liquidation.
@@ -821,7 +848,7 @@ class StrategyManager:
         "max_daily_losses_per_symbol": (1,    5),
         "min_score_threshold":    (0.0,  1.0),
         "adx_threshold":          (10,   50),
-        "volume_multiplier":      (0.5,  5.0),
+        "volume_multiplier":      (0.0,  5.0),
         "partial_tp_ratio":       (0.1,  0.9),
         "partial_tp_trigger_pct": (0.1,  10.0),
         "breakeven_trigger_pct":  (0.1,  10.0),
@@ -913,6 +940,10 @@ class StrategyManager:
                 symbol = pid_to_symbol.get(pid) or pos.get("symbol")
                 if not symbol or symbol not in self.product_info:
                     continue
+
+                with self.lock:
+                    if symbol in self.open_trades:
+                        continue
 
                 raw_size = pos.get("size", 0)
                 try:
@@ -1053,6 +1084,9 @@ class StrategyManager:
             pid = info.get("product_id")
             if not pid:
                 continue
+            with self.lock:
+                if symbol in self.open_trades:
+                    continue
             try:
                 position = self.client.get_position(pid)
                 pos = position.get("result", position) if isinstance(position, dict) else position
@@ -1187,7 +1221,7 @@ class StrategyManager:
         drop_pct = ((curr_close - lookback_high) / lookback_high) * 100.0
 
         if drop_pct <= -abs(thresh):
-            if not getattr(self, "btc_crash_active", False):
+            if not self.btc_crash_active:
                 logger.warning("🛑 BTC FLASH CRASH DETECTED: BTC dropped %.2f%% in 20min! Pausing Altcoin LONG entries.", drop_pct)
             self.btc_crash_active = True
             return True
@@ -1271,9 +1305,14 @@ class StrategyManager:
             # accuracy; 300 gives a safe buffer. 1000 × 17 symbols × 5s scan
             # was unnecessary CPU/memory load.
             candles = self.feed.get_candles(symbol, limit=300)
-            if not candles:
+            now_ts = time.time()
+            if not candles or (now_ts - candles[-1]["time"] > _RESOLUTION_SEC * 3):
+                with self.lock:
+                    self.last_scan.pop(symbol, None)
                 continue
-            diag = compute_diagnostics(symbol, candles, self.config)
+            eval_candles = candles[:-1] if len(candles) > 1 else candles
+            diag = compute_diagnostics(symbol, eval_candles, self.config)
+            diag["price"] = candles[-1]["close"]
             with self.lock:
                 self.last_scan[symbol] = diag
         self._logged_funding_scale = logged_funding
@@ -1383,25 +1422,25 @@ class StrategyManager:
         return status in ("rejected", "cancelled", "canceled", "failed", "expired")
 
     # ADDED: compute SL/TP either from ATR or the fixed-% fallback
-    def _compute_sl_tp(self, direction, entry_price, atr_val):
+    def _compute_sl_tp(self, symbol, direction, entry_price, atr_val):
         use_atr = self.config.get("use_atr_stops", False) and atr_val
         if use_atr:
             sl_mult = self.config.get("atr_sl_mult", 1.5)
             tp_mult = self.config.get("atr_tp_mult", 3.0)
             if direction == "long":
-                sl_price = _smart_round(entry_price - atr_val * sl_mult)
-                tp_price = _smart_round(entry_price + atr_val * tp_mult)
+                sl_price = self._rt(symbol, entry_price - atr_val * sl_mult)
+                tp_price = self._rt(symbol, entry_price + atr_val * tp_mult)
             else:
-                sl_price = _smart_round(entry_price + atr_val * sl_mult)
-                tp_price = _smart_round(entry_price - atr_val * tp_mult)
+                sl_price = self._rt(symbol, entry_price + atr_val * sl_mult)
+                tp_price = self._rt(symbol, entry_price - atr_val * tp_mult)
             return sl_price, tp_price
 
         if direction == "long":
-            sl_price = _smart_round(entry_price * (1 - self.config["stop_loss_pct"] / 100))
-            tp_price = _smart_round(entry_price * (1 + self.config["target_pct"] / 100))
+            sl_price = self._rt(symbol, entry_price * (1 - self.config["stop_loss_pct"] / 100))
+            tp_price = self._rt(symbol, entry_price * (1 + self.config["target_pct"] / 100))
         else:
-            sl_price = _smart_round(entry_price * (1 + self.config["stop_loss_pct"] / 100))
-            tp_price = _smart_round(entry_price * (1 - self.config["target_pct"] / 100))
+            sl_price = self._rt(symbol, entry_price * (1 + self.config["stop_loss_pct"] / 100))
+            tp_price = self._rt(symbol, entry_price * (1 - self.config["target_pct"] / 100))
         return sl_price, tp_price
 
     def _seed_sl_tp_for_recovery(self, symbol, direction, entry_price):
@@ -1416,38 +1455,33 @@ class StrategyManager:
                 self.config.get("atr_period", 14),
             )
             atr_val = atr_vals[-1] if atr_vals else None
-        return self._compute_sl_tp(direction, entry_price, atr_val)
+        return self._compute_sl_tp(symbol, direction, entry_price, atr_val)
 
     def _get_live_available_margin(self):
-        """Fetches real-time available margin balance from Delta Exchange via client."""
-        if not self.config.get("dry_run", True) and self.client and hasattr(self.client, "get_balances"):
-            try:
-                try:
-                    bal = self.client.get_balances(1)
-                except (TypeError, Exception):
-                    try:
-                        bal = self.client.get_balances()
-                    except Exception:
-                        return None
-                if not bal:
-                    return None
-                rows = bal.get("result", bal) if isinstance(bal, dict) else bal
-                if isinstance(rows, dict):
-                    rows = [rows]
-                if isinstance(rows, list):
-                    for row in rows:
-                        if isinstance(row, dict):
-                            for key in ("available_balance", "available", "balance"):
-                                val = row.get(key)
-                                if val is not None:
-                                    try:
-                                        v = float(val)
-                                        if v > 0:
-                                            return v
-                                    except (TypeError, ValueError):
-                                        pass
-            except Exception as e:
-                logger.warning("Could not fetch live available margin: %s", e)
+        """Settlement asset (USD/USDT) ka available_balance. 0 ho to 0 hi return hota hai."""
+        if self.config.get("dry_run", True) or not self.signed_request_fn:
+            return None
+        try:
+            ok, _, data = self.signed_request_fn("GET", "/v2/wallet/balances")
+            if not ok or not data:
+                return None
+            rows = data.get("result", data) if isinstance(data, dict) else data
+            if isinstance(rows, dict):
+                rows = [rows]
+            for row in (rows or []):
+                if not isinstance(row, dict):
+                    continue
+                if str(row.get("asset_symbol") or "").upper() not in ("USD", "USDT"):
+                    continue
+                for key in ("available_balance", "available"):
+                    val = row.get(key)
+                    if val is not None:
+                        try:
+                            return float(val)
+                        except (TypeError, ValueError):
+                            pass
+        except Exception as e:
+            logger.warning("Could not fetch live available margin: %s", e)
         return None
 
     def _enter_trade(self, sig):
@@ -1463,6 +1497,11 @@ class StrategyManager:
         # Dynamic available margin sync right before trade placement
         capital = float(self.config.get("capital", 50000))
         avail_bal = self._get_live_available_margin()
+        if avail_bal is not None and avail_bal <= 0:
+            logger.warning("No available margin (%.4f) — skipping %s", avail_bal, symbol)
+            with self.lock:
+                self.failed_symbols[symbol] = (time.time(), "fail")
+            return
         if avail_bal is not None and avail_bal > 0:
             capital = avail_bal
 
@@ -1470,14 +1509,14 @@ class StrategyManager:
         # then size risk off the REAL sl_move — not the fixed stop_loss_pct.
         # Previously sizing always used fixed % even when ATR stops were active,
         # causing inconsistent risk per trade.
-        sl_price, tp_price = self._compute_sl_tp(direction, entry_price, sig.get("atr"))
+        sl_price, tp_price = self._compute_sl_tp(symbol, direction, entry_price, sig.get("atr"))
         sl_move = abs(entry_price - sl_price)
 
         risk_amount = capital * (self.config["risk_pct"] / 100)
         loss_per_contract = sl_move * contract_value
         qty = max(int(risk_amount // loss_per_contract), 1) if loss_per_contract > 0 else 1
 
-        if loss_per_contract > 0 and 1 * loss_per_contract > risk_amount * 1.05:
+        if loss_per_contract > 0 and 1 * loss_per_contract > risk_amount:
             logger.warning(
                 "Skipping entry for %s: min 1 contract risk (%.2f) exceeds risk budget (%.2f)",
                 symbol, loss_per_contract, risk_amount,
@@ -1565,7 +1604,7 @@ class StrategyManager:
                     fill, entry_price, symbol,
                 )
                 entry_price = fill
-                sl_price, tp_price = self._compute_sl_tp(direction, entry_price, sig.get("atr"))
+                sl_price, tp_price = self._compute_sl_tp(symbol, direction, entry_price, sig.get("atr"))
                 # NOTE: bracket edit on filled entry order usually fails (open_order_not_found).
                 # We log the adjusted levels; the stop order fetch below will get the actual IDs.
                 logger.info(
@@ -1576,7 +1615,12 @@ class StrategyManager:
             # Fetch the open stop order IDs that Delta created as bracket legs.
             # These are needed for BE / trailing SL updates (not the entry order id).
             try:
-                sl_order_id, tp_order_id = self._fetch_open_stop_order_ids(product_id)
+                sl_order_id, tp_order_id = None, None
+                for _ in range(3):
+                    time.sleep(1.0)
+                    sl_order_id, tp_order_id = self._fetch_open_stop_order_ids(product_id)
+                    if sl_order_id and tp_order_id:
+                        break
                 if sl_order_id or tp_order_id:
                     logger.info("Fetched stop order ids for %s: SL_id=%s TP_id=%s", symbol, sl_order_id, tp_order_id)
                 else:
@@ -1808,10 +1852,10 @@ class StrategyManager:
 
         if direction == "long" and curr_price >= entry_price * (1 + trigger_pct / 100):
             should_activate = True
-            new_sl = _smart_round(entry_price * 1.0012)  # Cover round-trip fees (0.10%)
+            new_sl = self._rt(symbol, entry_price * 1.0012)  # Cover round-trip fees (0.10%)
         elif direction == "short" and curr_price <= entry_price * (1 - trigger_pct / 100):
             should_activate = True
-            new_sl = _smart_round(entry_price * 0.9988)
+            new_sl = self._rt(symbol, entry_price * 0.9988)
 
         cur_sl = trade_copy.get("sl_price")
         if should_activate and cur_sl is not None:
@@ -1902,13 +1946,13 @@ class StrategyManager:
 
         updated_sl = None
         if direction == "long":
-            target_sl = _smart_round(curr_price * (1 - dist_pct / 100))
-            min_new_sl = max(_smart_round(current_sl * (1 + step_pct / 100)), current_sl)
+            target_sl = self._rt(symbol, curr_price * (1 - dist_pct / 100))
+            min_new_sl = max(self._rt(symbol, current_sl * (1 + step_pct / 100)), current_sl)
             if target_sl >= min_new_sl and target_sl > current_sl:
                 updated_sl = target_sl
         elif direction == "short":
-            target_sl = _smart_round(curr_price * (1 + dist_pct / 100))
-            max_new_sl = min(_smart_round(current_sl * (1 - step_pct / 100)), current_sl)
+            target_sl = self._rt(symbol, curr_price * (1 + dist_pct / 100))
+            max_new_sl = min(self._rt(symbol, current_sl * (1 - step_pct / 100)), current_sl)
             if target_sl <= max_new_sl and target_sl < current_sl:
                 updated_sl = target_sl
 
@@ -1995,7 +2039,7 @@ class StrategyManager:
         if triggered:
             exit_qty = max(1, int(qty * ratio))
             rem_qty = qty - exit_qty
-            be_sl = _smart_round(entry_price * 1.0012) if direction == "long" else _smart_round(entry_price * 0.9988)
+            be_sl = self._rt(symbol, entry_price * 1.0012) if direction == "long" else self._rt(symbol, entry_price * 0.9988)
             cur_sl = trade_copy.get("sl_price")
             if cur_sl is not None:
                 be_sl = max(be_sl, cur_sl) if direction == "long" else min(be_sl, cur_sl)
@@ -2048,7 +2092,7 @@ class StrategyManager:
                             sl_moved = True
                     else:
                         logger.info("Partial TP: no stop order id for %s — internal SL set to BE %.6f", symbol, be_sl)
-                        sl_moved = True
+                        sl_moved = False
 
                     if tp_oid and rem_qty > 0:
                         tp_body = {
@@ -2117,6 +2161,8 @@ class StrategyManager:
                 pnl=pnl,
                 trade_id=trade_copy.get("trade_id"),
             )
+            return True
+        return False
 
     def _check_recovered_position_exits(self, symbol):
         """Monitors recovered or missing-order-id positions in live mode and executes a reduce-only market close when internal SL/TP is breached."""
@@ -2127,6 +2173,8 @@ class StrategyManager:
             trade_copy = dict(trade)
 
         order_id = _extract_order_id(trade_copy.get("order_result"))
+        if self.config.get("dry_run", True) and not trade_copy.get("recovered"):
+            return
         if order_id and not trade_copy.get("recovered"):
             return
 
@@ -2167,6 +2215,13 @@ class StrategyManager:
                         "order_type": "market_order",
                         "reduce_only": True
                     })
+                    if isinstance(res, dict) and (res.get("error") or self._order_looks_rejected(res)):
+                        logger.error("Live internal exit order rejected for %s: %s", symbol, res)
+                        with self.lock:
+                            if symbol in self.open_trades:
+                                self.open_trades[symbol].pop("in_closing", None)
+                        return
+
                     fill = self._get_last_fill_price(trade_copy["product_id"], side=exit_side, after_ts=trade_copy.get("entry_ts"))
                     exit_p = fill if fill is not None else curr_price
                     self._close_trade(symbol, trade_copy, exit_p, hit_reason)
@@ -2184,9 +2239,10 @@ class StrategyManager:
                 with self.lock:
                     symbols = list(self.open_trades.keys())
                 for symbol in symbols:
-                    self._check_partial_tp(symbol)
-                    self._check_breakeven_sl(symbol)
-                    self._check_trailing_sl(symbol)
+                    ptp_done = self._check_partial_tp(symbol)
+                    if not ptp_done:
+                        self._check_breakeven_sl(symbol)
+                        self._check_trailing_sl(symbol)
                     self._check_recovered_position_exits(symbol)
                     if self.config.get("dry_run", True):
                         self._check_dry_run_exit(symbol)
@@ -2212,8 +2268,11 @@ class StrategyManager:
         return gross - fees
 
     def _close_trade(self, symbol, trade, exit_price, note):
-        pnl = self._pnl_for_trade(trade, exit_price)
         with self.lock:
+            latest_trade = self.open_trades.get(symbol)
+            if latest_trade:
+                trade = dict(latest_trade)
+            pnl = self._pnl_for_trade(trade, exit_price)
             self.realized_pnl_today += pnl
             self.symbol_trades_today[symbol] += 1
             if pnl < 0:
