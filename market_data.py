@@ -15,12 +15,18 @@ import websocket
 #   OLD: v2/ticker       NEW: ticker
 #   Candlestick channel (candlestick_1m) stays the same on new endpoint.
 # ---------------------------------------------------------------------------
-WS_URL     = "wss://public-socket.india.delta.exchange"  # new public endpoint
-REST_BASE  = "https://api.india.delta.exchange"
+import os
+
+REST_BASE = os.getenv("DELTA_BASE_URL", "https://api.india.delta.exchange").rstrip("/")
+# Map api.* to socket.* for WebSocket
+WS_URL = REST_BASE.replace("https://api.", "wss://socket.").replace("https://", "wss://")
+# The new public endpoint for India is wss://public-socket.india.delta.exchange
+if "india.delta.exchange" in WS_URL:
+    WS_URL = "wss://public-socket.india.delta.exchange"
 
 # Channel names for the new public WS endpoint
 WS_TICKER_CHANNEL = "ticker"                    # was "v2/ticker" on legacy endpoint
-WS_CANDLE_CHANNEL = f"candlestick_{{RESOLUTION}}"  # unchanged, templated below
+WS_CANDLE_CHANNEL = f"candlestick_{RESOLUTION}"  # unchanged, templated below
 
 RESOLUTION          = "1m"   # candle timeframe
 BACKFILL_MINUTES    = 200    # past candles to preload per symbol
