@@ -26,9 +26,9 @@ if "india.delta.exchange" in WS_URL:
 
 # Channel names for the new public WS endpoint
 WS_TICKER_CHANNEL = "ticker"                    # was "v2/ticker" on legacy endpoint
+RESOLUTION          = "1m"   # candle timeframe
 WS_CANDLE_CHANNEL = f"candlestick_{RESOLUTION}"  # unchanged, templated below
 
-RESOLUTION          = "1m"   # candle timeframe
 BACKFILL_MINUTES    = 200    # past candles to preload per symbol
 SUBSCRIBE_CHUNK_SIZE = 25   # small chunks to avoid oversized WS frames
 
