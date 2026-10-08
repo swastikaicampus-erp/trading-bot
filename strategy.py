@@ -1473,7 +1473,7 @@ class StrategyManager:
                     continue
                 if str(row.get("asset_symbol") or "").upper() not in ("USD", "USDT"):
                     continue
-                for key in ("available_balance", "available"):
+                for key in ("balance", "equity", "available_balance", "available"):
                     val = row.get(key)
                     if val is not None:
                         try:
