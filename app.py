@@ -115,7 +115,9 @@ def _load_or_discover_watchlist():
             print(f"[startup] {WATCHLIST_FILE} unreadable, re-discovering from Delta")
 
     try:
-        symbols = discover_perpetual_futures_symbols(quote_assets=PERP_QUOTE_ASSET_FILTER, max_symbols=MAX_WATCHLIST_CAP)
+        from strategy import DEFAULT_CONFIG
+        blacklist = DEFAULT_CONFIG.get("symbol_blacklist", [])
+        symbols = discover_perpetual_futures_symbols(quote_assets=PERP_QUOTE_ASSET_FILTER, max_symbols=MAX_WATCHLIST_CAP, blacklist=blacklist)
         print(f"[startup] discovered {len(symbols)} top liquid perpetual futures from Delta")
         return symbols
     except Exception as e:

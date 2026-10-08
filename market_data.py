@@ -75,12 +75,14 @@ def _safe_float(val, default=0.0):
         return default
 
 
-def discover_perpetual_futures_symbols(quote_assets={"USD"}, max_symbols=None):
+def discover_perpetual_futures_symbols(quote_assets={"USD"}, max_symbols=None, blacklist=None):
     """
     Delta ke /v2/products se LIVE perpetual futures symbols nikalta hai,
     24h volume/turnover ke basis par sort karke Top `max_symbols` (default 30 or MAX_SYMBOLS env)
     most liquid contracts return karta hai.
     """
+    if blacklist is None:
+        blacklist = []
     if max_symbols is None:
         try:
             max_symbols = int(os.getenv("MAX_SYMBOLS", "30"))
@@ -101,7 +103,7 @@ def discover_perpetual_futures_symbols(quote_assets={"USD"}, max_symbols=None):
         if row.get("trading_status") not in (None, "operational"):
             continue
         symbol = row.get("symbol")
-        if not symbol:
+        if not symbol or symbol in blacklist:
             continue
         if quote_assets:
             quoting = (row.get("quoting_asset") or {}).get("symbol")
