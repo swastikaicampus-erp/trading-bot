@@ -51,26 +51,26 @@ WATCHLIST_FILE = "watchlist.json"
 # in web server access logs, proxies, and browser history.
 _DASHBOARD_API_TOKEN = os.getenv("DASHBOARD_API_TOKEN", "")
 
-# Paths exempt from auth even when token is configured
-_AUTH_SAFE_PATHS = {
+_AUTH_SAFE_EXACT = {
     "/", "/health", "/system/status", "/strategy/status", "/rate-limit",
-    "/candles", "/ticker", "/tickers", "/products", "/watchlist",
+    "/tickers", "/products", "/watchlist",
 }
+_AUTH_SAFE_PREFIXES = ("/candles", "/ticker/")
 
 @app.before_request
 def _require_api_token():
     """Block mutating requests unless the correct DASHBOARD_API_TOKEN is
     provided via the X-API-Token request header. Safe (read-only) routes are
-    always allowed. If no token is configured in .env, this is a no-op."""
+    always allowed. OPTIONS preflight CORS requests are also allowed."""
+    if request.method == "OPTIONS":
+        return
     if not _DASHBOARD_API_TOKEN:
         return  # auth disabled — no token configured
-    # Allow all GETs to public read routes without a token
     path = request.path
-    if request.method == "GET" and any(path.startswith(p) for p in _AUTH_SAFE_PATHS):
+    if request.method == "GET" and (path in _AUTH_SAFE_EXACT or any(path.startswith(p) for p in _AUTH_SAFE_PREFIXES)):
         return
-    # Header-only: never read from query params (log-leak risk)
-    token = request.headers.get("X-API-Token")
-    if token != _DASHBOARD_API_TOKEN:
+    token = request.headers.get("X-API-Token") or ""
+    if not hmac.compare_digest(token, _DASHBOARD_API_TOKEN):
         from flask import abort
         abort(401)
 
@@ -320,23 +320,27 @@ def _sync_capital_from_balance():
         if isinstance(rows, dict):
             rows = [rows]
         if isinstance(rows, list):
-            max_bal = 0.0
+            found_bal = None
             for row in rows:
                 if isinstance(row, dict):
-                    for key in ("available_balance", "available", "balance", "equity"):
+                    # Priority order: available_balance first, then available, then balance (never equity)
+                    for key in ("available_balance", "available", "balance"):
                         val = row.get(key)
                         if val is not None:
                             try:
                                 v = float(val)
-                                if v > max_bal:
-                                    max_bal = v
+                                if v > 0:
+                                    found_bal = v
+                                    break
                             except (TypeError, ValueError):
                                 pass
-            if max_bal > 0:
+                    if found_bal is not None:
+                        break
+            if found_bal is not None and found_bal > 0:
                 old_cap = strategy.config.get("capital")
-                strategy.config["capital"] = max_bal
-                if old_cap is None or abs(old_cap - max_bal) > 0.01:
-                    print(f"[balance-sync] strategy capital updated from balance: {max_bal:.4f}")
+                strategy.config["capital"] = found_bal
+                if old_cap is None or abs(old_cap - found_bal) > 0.01:
+                    print(f"[balance-sync] strategy capital updated from balance: {found_bal:.4f}")
                 return
     except Exception as e:
         print(f"[balance-sync] could not sync capital from balance: {e}")
@@ -793,7 +797,7 @@ def cancel_order():
     # FIX: Use _signed_request (consistent with all other order routes) instead
     # of client.cancel_order which uses a different signing path.
     body = {"id": order_id, "product_id": product_id}
-    ok, status, resp_data = _signed_request("DELETE", f"/v2/orders/{order_id}", body=body)
+    ok, status, resp_data = _signed_request("DELETE", "/v2/orders", body=body)
     return _delta_json_response(ok, status, resp_data)
 
 

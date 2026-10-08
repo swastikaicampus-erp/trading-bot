@@ -756,6 +756,7 @@ class StrategyManager:
         self.product_info = resolve_product_info(client, self.symbols)
 
         self.running = False
+        self._gen = 0
         self.scan_thread = None
         self.monitor_thread = None
         self.lock = threading.Lock()
@@ -778,11 +779,13 @@ class StrategyManager:
             if self.running:
                 return
             self.running = True
+            self._gen += 1
+            gen = self._gen
 
         self._sync_open_positions()
 
-        self.scan_thread = threading.Thread(target=self._scan_loop, daemon=True)
-        self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self.scan_thread = threading.Thread(target=self._scan_loop, args=(gen,), daemon=True)
+        self.monitor_thread = threading.Thread(target=self._monitor_loop, args=(gen,), daemon=True)
         self.scan_thread.start()
         self.monitor_thread.start()
         logger.info("Strategy scanner started over %d symbols", len(self.symbols))
@@ -1210,8 +1213,8 @@ class StrategyManager:
             return True
 
     # -- scanning ------------------------------------------------------
-    def _scan_loop(self):
-        while self.running:
+    def _scan_loop(self, gen):
+        while self.running and gen == self._gen:
             try:
                 self._roll_day_if_needed()
                 self._prune_failed_symbols()
@@ -1432,20 +1435,17 @@ class StrategyManager:
                 if isinstance(rows, dict):
                     rows = [rows]
                 if isinstance(rows, list):
-                    max_bal = 0.0
                     for row in rows:
                         if isinstance(row, dict):
-                            for key in ("available_balance", "available", "balance", "equity"):
+                            for key in ("available_balance", "available", "balance"):
                                 val = row.get(key)
                                 if val is not None:
                                     try:
                                         v = float(val)
-                                        if v > max_bal:
-                                            max_bal = v
+                                        if v > 0:
+                                            return v
                                     except (TypeError, ValueError):
                                         pass
-                    if max_bal > 0:
-                        return max_bal
             except Exception as e:
                 logger.warning("Could not fetch live available margin: %s", e)
         return None
@@ -1808,10 +1808,18 @@ class StrategyManager:
 
         if direction == "long" and curr_price >= entry_price * (1 + trigger_pct / 100):
             should_activate = True
-            new_sl = _smart_round(entry_price * 1.0005)  # Cover slight round-trip fee
+            new_sl = _smart_round(entry_price * 1.0012)  # Cover round-trip fees (0.10%)
         elif direction == "short" and curr_price <= entry_price * (1 - trigger_pct / 100):
             should_activate = True
-            new_sl = _smart_round(entry_price * 0.9995)
+            new_sl = _smart_round(entry_price * 0.9988)
+
+        cur_sl = trade_copy.get("sl_price")
+        if should_activate and cur_sl is not None:
+            if (direction == "long" and new_sl <= cur_sl) or (direction == "short" and new_sl >= cur_sl):
+                with self.lock:
+                    if symbol in self.open_trades:
+                        self.open_trades[symbol]["breakeven_activated"] = True
+                return
 
         if should_activate:
             with self.lock:
@@ -1987,7 +1995,10 @@ class StrategyManager:
         if triggered:
             exit_qty = max(1, int(qty * ratio))
             rem_qty = qty - exit_qty
-            be_sl = _smart_round(entry_price * 1.0005) if direction == "long" else _smart_round(entry_price * 0.9995)
+            be_sl = _smart_round(entry_price * 1.0012) if direction == "long" else _smart_round(entry_price * 0.9988)
+            cur_sl = trade_copy.get("sl_price")
+            if cur_sl is not None:
+                be_sl = max(be_sl, cur_sl) if direction == "long" else min(be_sl, cur_sl)
             sl_moved = True
 
             if not self.config.get("dry_run", True) and self.place_order_fn:
@@ -2167,8 +2178,8 @@ class StrategyManager:
             else:
                 self._close_trade(symbol, trade_copy, curr_price, hit_reason)
 
-    def _monitor_loop(self):
-        while self.running:
+    def _monitor_loop(self, gen):
+        while self.running and gen == self._gen:
             try:
                 with self.lock:
                     symbols = list(self.open_trades.keys())
