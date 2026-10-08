@@ -504,9 +504,14 @@ class MarketDataFeed:
         elif msg_type.startswith("candlestick_"):
             candle_time = msg.get("candle_start_time", msg.get("timestamp"))
             if candle_time is None:
-                # CHANGED: no usable timestamp -> this tick can't be placed
-                # in the series at all, skip it instead of storing garbage
                 return
+            try:
+                candle_time = int(candle_time)
+            except (TypeError, ValueError):
+                try:
+                    candle_time = int(float(candle_time))
+                except (TypeError, ValueError):
+                    pass
 
             candle = {
                 "time": candle_time,

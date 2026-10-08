@@ -957,9 +957,6 @@ class StrategyManager:
                             "product_id": pid,
                             "size": qty,
                             "side": stop_side,
-                            # FIX 5a: Use market_order (stop-market) not limit_order.
-                            # limit_order without limit_price causes Delta API rejection,
-                            # meaning recovered positions had NO exchange-side SL protection.
                             "order_type": "market_order",
                             "stop_order_type": "stop_loss_order",
                             "stop_price": str(rec_sl),
@@ -976,6 +973,31 @@ class StrategyManager:
                             logger.warning("RECOVERED %s: could not place exchange SL stop: %s", symbol, sl_res)
                     except Exception as ex:
                         logger.warning("RECOVERED %s: exception placing exchange SL stop: %s", symbol, ex)
+
+                # Place exchange-side TP stop order for recovered position if missing
+                if not rec_tp_oid and rec_tp and not self.config.get("dry_run", True) and self.place_order_fn:
+                    stop_side = "sell" if direction == "long" else "buy"
+                    try:
+                        tp_order_body = {
+                            "product_id": pid,
+                            "size": qty,
+                            "side": stop_side,
+                            "order_type": "market_order",
+                            "stop_order_type": "take_profit_order",
+                            "stop_price": str(rec_tp),
+                            "reduce_only": True,
+                        }
+                        tp_res = self.place_order_fn(tp_order_body)
+                        if isinstance(tp_res, dict) and not tp_res.get("error"):
+                            rec_tp_oid = _extract_order_id(tp_res)
+                            logger.info(
+                                "RECOVERED %s: placed exchange TP stop order at %.6f, id=%s",
+                                symbol, rec_tp, rec_tp_oid,
+                            )
+                        else:
+                            logger.warning("RECOVERED %s: could not place exchange TP stop: %s", symbol, tp_res)
+                    except Exception as ex:
+                        logger.warning("RECOVERED %s: exception placing exchange TP stop: %s", symbol, ex)
 
                 # FIX 3: Assign trade_id to recovered positions so PARTIAL_TP
                 # and EXIT log events can be grouped correctly in check_pnl.py.
@@ -1074,7 +1096,6 @@ class StrategyManager:
                             "product_id": pid,
                             "size": qty,
                             "side": stop_side,
-                            # FIX 5b: Stop-market (same fix as batch path above).
                             "order_type": "market_order",
                             "stop_order_type": "stop_loss_order",
                             "stop_price": str(rec_sl),
@@ -1087,6 +1108,26 @@ class StrategyManager:
                             logger.warning("RECOVERED(fallback) %s: could not place exchange SL: %s", symbol, sl_res)
                     except Exception as ex:
                         logger.warning("RECOVERED(fallback) %s: exception placing exchange SL: %s", symbol, ex)
+
+                if not rec_tp_oid and rec_tp and not self.config.get("dry_run", True) and self.place_order_fn:
+                    stop_side = "sell" if direction == "long" else "buy"
+                    try:
+                        tp_res = self.place_order_fn({
+                            "product_id": pid,
+                            "size": qty,
+                            "side": stop_side,
+                            "order_type": "market_order",
+                            "stop_order_type": "take_profit_order",
+                            "stop_price": str(rec_tp),
+                            "reduce_only": True,
+                        })
+                        if isinstance(tp_res, dict) and not tp_res.get("error"):
+                            rec_tp_oid = _extract_order_id(tp_res)
+                            logger.info("RECOVERED(fallback) %s: placed exchange TP at %.6f, id=%s", symbol, rec_tp, rec_tp_oid)
+                        else:
+                            logger.warning("RECOVERED(fallback) %s: could not place exchange TP: %s", symbol, tp_res)
+                    except Exception as ex:
+                        logger.warning("RECOVERED(fallback) %s: exception placing exchange TP: %s", symbol, ex)
 
                 # FIX 3b: Assign trade_id to fallback-recovered positions.
                 rec_trade_id = str(uuid.uuid4())[:12]
@@ -1712,7 +1753,7 @@ class StrategyManager:
         try:
             ok, _, orders_resp = self.signed_request_fn(
                 "GET", "/v2/orders",
-                query_params={"product_ids": str(product_id), "states": "open"},
+                query_params={"product_ids": str(product_id), "states": "open,pending"},
             )
             if not ok or not orders_resp:
                 return None, None
@@ -1797,7 +1838,6 @@ class StrategyManager:
                         order_body = {
                             "id": sl_oid,
                             "product_id": product_id,
-                            "bracket_stop_loss_price": str(new_sl),
                             "stop_price": str(new_sl),
                         }
                         logger.info("Sending break-even SL update for %s via stop order %s", symbol, sl_oid)
@@ -1887,7 +1927,6 @@ class StrategyManager:
                         order_body = {
                             "id": sl_oid,
                             "product_id": product_id,
-                            "bracket_stop_loss_price": str(updated_sl),
                             "stop_price": str(updated_sl),
                         }
                         res = self.place_order_fn(order_body)
@@ -1981,18 +2020,15 @@ class StrategyManager:
                 # Pattern mirrors _check_breakeven_sl / _check_trailing_sl.
                 sl_moved = False
                 try:
-                    sl_oid = trade_copy.get("sl_order_id")
+                    sl_oid, tp_oid = self._fetch_open_stop_order_ids(product_id)
                     if not sl_oid:
-                        sl_oid, _ = self._fetch_open_stop_order_ids(product_id)
-                        if sl_oid:
-                            with self.lock:
-                                if symbol in self.open_trades:
-                                    self.open_trades[symbol]["sl_order_id"] = sl_oid
+                        sl_oid = trade_copy.get("sl_order_id")
                     if sl_oid:
                         sl_body = {
                             "id": sl_oid,
                             "product_id": product_id,
-                            "bracket_stop_loss_price": str(be_sl),
+                            "stop_price": str(be_sl),
+                            "size": rem_qty,
                         }
                         sl_res = self.place_order_fn(sl_body)
                         if isinstance(sl_res, dict) and (sl_res.get("error") or self._order_looks_rejected(sl_res)):
@@ -2000,15 +2036,22 @@ class StrategyManager:
                         else:
                             sl_moved = True
                     else:
-                        # No stop order id (recovered trade or unfound) — update internal SL only.
-                        # _check_recovered_position_exits will enforce it live.
-                        logger.info(
-                            "Partial TP: no stop order id for %s — internal SL set to BE %.6f",
-                            symbol, be_sl
-                        )
+                        logger.info("Partial TP: no stop order id for %s — internal SL set to BE %.6f", symbol, be_sl)
                         sl_moved = True
+
+                    if tp_oid and rem_qty > 0:
+                        tp_body = {
+                            "id": tp_oid,
+                            "product_id": product_id,
+                            "size": rem_qty,
+                        }
+                        try:
+                            self.place_order_fn(tp_body)
+                            logger.info("Updated exchange TP size to %d after partial TP for %s", rem_qty, symbol)
+                        except Exception as e:
+                            logger.warning("Could not update exchange TP size for %s: %s", symbol, e)
                 except Exception as e:
-                    logger.warning("BE SL update after partial TP failed for %s: %s", symbol, e)
+                    logger.warning("BE SL / TP update after partial TP failed for %s: %s", symbol, e)
 
             if sl_moved:
                 logger.info(

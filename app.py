@@ -238,30 +238,31 @@ def _delta_json_response(ok, status_code, data):
 _SET_LEVERAGE_CACHE = {}
 
 def _place_order_for_strategy(order_body):
-    """Strategy entry / update path: routes bracket edits to PUT /v2/orders/bracket, else POST /v2/orders."""
+    """Strategy entry / update path: routes standalone stop edits to PUT /v2/orders, bracket entries to POST /v2/orders."""
     product_id = order_body.get("product_id")
     order_id = order_body.get("id")
 
     # If this is an order edit request (has order_id and no side)
     if order_id and "side" not in order_body:
+        stop_px = order_body.get("stop_price") or order_body.get("bracket_stop_loss_price") or order_body.get("bracket_take_profit_price")
+        edit_payload = {"id": order_id}
+        if product_id:
+            edit_payload["product_id"] = product_id
+        if stop_px:
+            edit_payload["stop_price"] = str(stop_px)
+        if "size" in order_body:
+            edit_payload["size"] = order_body["size"]
+
+        ok, status, data = _signed_request("PUT", "/v2/orders", body=edit_payload)
+        if ok:
+            return data.get("result", data)
+        
+        # Fallback: if PUT /v2/orders fails and bracket fields present, try /v2/orders/bracket
         if "bracket_stop_loss_price" in order_body or "bracket_take_profit_price" in order_body:
-            ok, status, data = _signed_request("PUT", "/v2/orders/bracket", body=order_body)
-            if ok:
-                return data.get("result", data)
-            # Fallback: if bracket PUT fails, try updating stop_price on standard order endpoint
-            stop_px = order_body.get("bracket_stop_loss_price") or order_body.get("stop_price")
-            if stop_px and product_id:
-                edit_body = {"id": order_id, "product_id": product_id, "stop_price": str(stop_px)}
-                ok2, status2, data2 = _signed_request("PUT", "/v2/orders", body=edit_body)
-                if ok2:
-                    return data2.get("result", data2)
-            return {"error": _friendly_error(data).get("message") or str(data)}
-        else:
-            # Direct stop order edit via PUT /v2/orders
-            ok, status, data = _signed_request("PUT", "/v2/orders", body=order_body)
-            if ok:
-                return data.get("result", data)
-            return {"error": _friendly_error(data).get("message") or str(data)}
+            ok2, status2, data2 = _signed_request("PUT", "/v2/orders/bracket", body=order_body)
+            if ok2:
+                return data2.get("result", data2)
+        return {"error": _friendly_error(data).get("message") or str(data)}
 
     # Otherwise new order placement: soft-set leverage first ONLY for new entry orders (cached per product)
     if product_id and not DRY_RUN and not order_body.get("reduce_only"):
