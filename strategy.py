@@ -59,27 +59,27 @@ DEFAULT_CONFIG = {
     # momentum filter -- LONG (widened band so momentum moves aren't instantly rejected)
     "rsi_period": 14,
     "rsi_floor": 35,
-    "rsi_overbought": 85,
+    "rsi_overbought": 75,
 
     # momentum filter -- SHORT
     "rsi_short_floor": 15,
     "rsi_short_ceiling": 65,
 
-    # trend filter (ADX threshold 16 for stronger trend confirmation)
+    # trend filter (ADX threshold 25 for stronger trend confirmation)
     "adx_period": 14,
-    "adx_threshold": 16,
+    "adx_threshold": 28,
     "require_adx_rising": False,
 
     # microscopic EMA cross filter
-    "min_ema_separation_pct": 0.01,
+    "min_ema_separation_pct": 0.04,
 
     # EMA cross lookback window (candles) — 5 candles (25 mins on 5m chart)
     "cross_lookback_candles": 5,
-    "require_cross_confirmation": False,
+    "require_cross_confirmation": True,
 
     # volume filter (0.0 = volume score used in ranking, not hard-rejecting trades)
     "volume_lookback": 20,
-    "volume_multiplier": 0.0,
+    "volume_multiplier": 1.15,
 
     # vwap filter
     "vwap_filter": True,
@@ -94,11 +94,11 @@ DEFAULT_CONFIG = {
     "stop_loss_pct": 1.2,
     "target_pct": 4.2,
 
-    # ATR-based stops -- per-symbol volatility instead of fixed % (4.2x TP gives 3.5:1 RR)
+    # ATR-based stops -- per-symbol volatility instead of fixed %
     "use_atr_stops": True,
     "atr_period": 14,
-    "atr_sl_mult": 1.2,
-    "atr_tp_mult": 4.2,
+    "atr_sl_mult": 1.3,
+    "atr_tp_mult": 3.8,
 
     # fees (Delta India taker ~0.05% each side -> ~0.10% round trip)
     "fee_rate_round_trip": 0.0010,
@@ -122,12 +122,12 @@ DEFAULT_CONFIG = {
     ],
 
     # minimum score threshold -- balance quality and trade frequency
-    "min_score_threshold": 0.35,
+    "min_score_threshold": 0.62,
 
     # portfolio-level limits (optimized for small $12 account)
-    "max_trades_per_day": 8,
-    "max_concurrent_trades": 2,
-    "max_daily_trades_per_symbol": 2,
+    "max_trades_per_day": 5,
+    "max_concurrent_trades": 1,
+    "max_daily_trades_per_symbol": 1,
     "max_daily_losses_per_symbol": 2,
     # Absolute dollar loss circuit-breaker (legacy, for small accounts)
     "max_daily_loss": 5,
@@ -142,12 +142,12 @@ DEFAULT_CONFIG = {
     "monitor_interval_sec": 10,
     "failed_retry_cooldown_sec": 1800,
 
-    # post-exit cooldown (seconds) -- 1 hour (3600s) to prevent immediate re-entry loops
-    "post_exit_cooldown_sec": 3600,
+    # post-exit cooldown (seconds) -- 1.5 hours (5400s) to prevent immediate re-entry loops
+    "post_exit_cooldown_sec": 5400,
 
     # Break-Even Stop Loss
     "enable_breakeven_sl": True,
-    "breakeven_trigger_pct": 1.5,
+    "breakeven_trigger_pct": 1.8,
 
     # Bid-Ask Spread Filter -- reject entries if spread exceeds max threshold (%)
     "enable_spread_filter": True,
@@ -155,7 +155,7 @@ DEFAULT_CONFIG = {
 
     # Dynamic Trailing Stop Loss
     "enable_trailing_sl": True,
-    "trailing_distance_pct": 1.0,
+    "trailing_distance_pct": 1.2,
     "trailing_step_pct": 0.3,
 
     # Multi-Timeframe (1-Hour) Trend Confirmation
@@ -168,10 +168,10 @@ DEFAULT_CONFIG = {
     "btc_dump_threshold_pct": 1.0,
     "btc_symbol": "BTCUSD",
 
-    # 2. Partial Take-Profit (50% exit at +1.0% profit)
+    # 2. Partial Take-Profit (40% exit at +1.4% profit)
     "enable_partial_tp": True,
-    "partial_tp_trigger_pct": 1.0,
-    "partial_tp_ratio": 0.5,
+    "partial_tp_trigger_pct": 1.4,
+    "partial_tp_ratio": 0.4,
 
     # 3. VWAP Upper Band Overbought Filter (+1.5 StdDev)
     "enable_vwap_band_filter": True,
