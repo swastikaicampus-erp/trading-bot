@@ -65,21 +65,21 @@ DEFAULT_CONFIG = {
     "rsi_short_floor": 15,
     "rsi_short_ceiling": 65,
 
-    # trend filter (ADX threshold 25 for stronger trend confirmation)
+    # trend filter (ADX threshold 22 for healthy trend confirmation)
     "adx_period": 14,
-    "adx_threshold": 28,
+    "adx_threshold": 22,
     "require_adx_rising": False,
 
     # microscopic EMA cross filter
     "min_ema_separation_pct": 0.04,
 
-    # EMA cross lookback window (candles) — 5 candles (25 mins on 5m chart)
-    "cross_lookback_candles": 5,
+    # EMA cross lookback window (candles) — 8 candles
+    "cross_lookback_candles": 8,
     "require_cross_confirmation": True,
 
-    # volume filter (0.0 = volume score used in ranking, not hard-rejecting trades)
+    # volume filter (1.0 = average volume confirmation)
     "volume_lookback": 20,
-    "volume_multiplier": 1.15,
+    "volume_multiplier": 1.0,
 
     # vwap filter
     "vwap_filter": True,
@@ -109,7 +109,7 @@ DEFAULT_CONFIG = {
 
     # symbol blacklist -- toxic or underperforming altcoins to skip
     "symbol_blacklist": [
-        "BASEDUSD", "LINKUSD", "ETHUSD", "DOGEUSD", "SAGAUSD", "PENDLEUSD", "BCHUSD", "POPCATUSD", "NEARUSD",
+        "VIRTUALUSD", "BASEDUSD", "LINKUSD", "ETHUSD", "DOGEUSD", "SAGAUSD", "PENDLEUSD", "BCHUSD", "POPCATUSD", "NEARUSD",
         "LTCUSD", "ARMBUSD", "BILLUSD", "REDUSD", "SPXUSD", "SUSHIUSD", "1000BONKUSD", "WDCBUSD",
         "XMRUSD", "TRXUSD", "RIVERUSD", "SKHYBUSD", "RKLBBUSD", "AMZNXUSD", "TRUMPUSD", "PAXGUSD",
         "ZROUSD", "SLVONUSD", "SPYXUSD", "AVAAIUSD", "LABUSD", "BEATUSD", "POLUSD", "ARCUSD",
@@ -122,12 +122,12 @@ DEFAULT_CONFIG = {
     ],
 
     # minimum score threshold -- balance quality and trade frequency
-    "min_score_threshold": 0.62,
+    "min_score_threshold": 0.55,
 
-    # portfolio-level limits (optimized for small $12 account)
-    "max_trades_per_day": 5,
-    "max_concurrent_trades": 1,
-    "max_daily_trades_per_symbol": 1,
+    # portfolio-level limits (optimized for small account)
+    "max_trades_per_day": 8,
+    "max_concurrent_trades": 2,
+    "max_daily_trades_per_symbol": 2,
     "max_daily_losses_per_symbol": 2,
     # Absolute dollar loss circuit-breaker (legacy, for small accounts)
     "max_daily_loss": 5,
@@ -142,8 +142,8 @@ DEFAULT_CONFIG = {
     "monitor_interval_sec": 10,
     "failed_retry_cooldown_sec": 1800,
 
-    # post-exit cooldown (seconds) -- 1.5 hours (5400s) to prevent immediate re-entry loops
-    "post_exit_cooldown_sec": 5400,
+    # post-exit cooldown (seconds) -- 30 minutes (1800s) to allow healthy setups without over-waiting
+    "post_exit_cooldown_sec": 1800,
 
     # Break-Even Stop Loss
     "enable_breakeven_sl": True,
