@@ -1306,7 +1306,9 @@ class StrategyManager:
             # was unnecessary CPU/memory load.
             candles = self.feed.get_candles(symbol, limit=300)
             now_ts = time.time()
-            if not candles or (now_ts - candles[-1]["time"] > _RESOLUTION_SEC * 3):
+            # Allow up to 8 resolution periods (8 mins on 1m) buffer so temporary WS reconnects
+            # do not immediately empty the entire scan grid.
+            if not candles or (now_ts - candles[-1]["time"] > _RESOLUTION_SEC * 8):
                 with self.lock:
                     self.last_scan.pop(symbol, None)
                 continue

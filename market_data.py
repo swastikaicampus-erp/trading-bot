@@ -354,11 +354,11 @@ class MarketDataFeed:
                 with self._ws_lock:
                     self._ws = ws
                     self._connect_count += 1  # FIX: increment before on_open fires
-                # ping_interval=45: send WS ping every 45s (was 30).
-                # ping_timeout=30:  allow 30s for pong reply (was 20).
-                # Delta India servers have variable latency from VPS environments.
-                # 45s/30s prevents false ping/pong timeouts over volatile market periods.
-                ws.run_forever(ping_interval=45, ping_timeout=30)
+                # Delta Exchange sends server heartbeat every 30s.
+                # Client must keep connection alive before Delta drops it:
+                # ping_interval=20s sends standard ping frame well within 30s.
+                # ping_timeout=10s detects genuine disconnects cleanly.
+                ws.run_forever(ping_interval=20, ping_timeout=10)
             except Exception as e:
                 print(f"[market_data] ws crashed: {e}")
             with self._ws_lock:
@@ -409,6 +409,8 @@ class MarketDataFeed:
                     return
                 self._backfill_in_progress.set()
                 try:
+                    # Let WS handshake and initial subscriptions finish before hitting REST API
+                    time.sleep(2.0)
                     syms = self.get_symbols()
                     print(f"[market_data] reconnect backfill: refreshing last 40 candles for {len(syms)} symbols (parallel)")
                     end = int(time.time())
