@@ -119,6 +119,7 @@ DEFAULT_CONFIG = {
         "HYPEUSD", "PENGUUSD", "ESPORTSUSD", "MUBARAKUSD", "TLMUSD", "GALAUSD", "XANUSD",
         "DASHUSD", "LISTAUSD", "SUIUSD", "ENAUSD", "DYDXUSD", "DOTUSD", "SOPHUSD", "HIVEUSD",
         "XRPUSD", "METAXUSD", "GOATUSD", "FILUSD",
+        "SOLVUSD", "RSRUSD", "XAUTUSD", "SPCXXUSD", "TSLAXUSD", "NVDAXUSD", "GIGGLEUSD", "ALLOUSD",
     ],
 
     # minimum score threshold -- balance quality and trade frequency
