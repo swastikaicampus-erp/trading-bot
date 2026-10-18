@@ -354,11 +354,13 @@ class MarketDataFeed:
                 with self._ws_lock:
                     self._ws = ws
                     self._connect_count += 1  # FIX: increment before on_open fires
-                # Delta Exchange sends server heartbeat every 30s.
-                # Client must keep connection alive before Delta drops it:
-                # ping_interval=20s sends standard ping frame well within 30s.
-                # ping_timeout=10s detects genuine disconnects cleanly.
-                ws.run_forever(ping_interval=20, ping_timeout=10)
+                # Delta Exchange uses application-level JSON heartbeat (enable_heartbeat),
+                # NOT RFC binary Pong frames. Setting ping_timeout=10 was causing a
+                # guaranteed disconnect every ~30s because the server never sends an RFC
+                # Pong reply. ping_timeout=None disables the RFC Pong wait entirely so
+                # Delta's JSON heartbeat handles liveness without false timeouts.
+                # ping_interval=20 still sends a keep-alive ping to prevent NAT/firewall drops.
+                ws.run_forever(ping_interval=20, ping_timeout=None)
             except Exception as e:
                 print(f"[market_data] ws crashed: {e}")
             with self._ws_lock:
