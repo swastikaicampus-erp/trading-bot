@@ -15,8 +15,6 @@ import websocket
 #   OLD: v2/ticker       NEW: ticker
 #   Candlestick channel (candlestick_1m) stays the same on new endpoint.
 # ---------------------------------------------------------------------------
-import os
-
 REST_BASE = os.getenv("DELTA_BASE_URL", "https://api.india.delta.exchange").rstrip("/")
 # Map api.* to socket.* for WebSocket
 WS_URL = REST_BASE.replace("https://api.", "wss://socket.").replace("https://", "wss://")
@@ -414,9 +412,9 @@ class MarketDataFeed:
                     # Let WS handshake and initial subscriptions finish before hitting REST API
                     time.sleep(2.0)
                     syms = self.get_symbols()
-                    print(f"[market_data] reconnect backfill: refreshing last 40 candles for {len(syms)} symbols (parallel)")
+                    print(f"[market_data] reconnect backfill: refreshing last 80 candles for {len(syms)} symbols (parallel)")
                     end = int(time.time())
-                    start_ts = end - 40 * 60  # last 40 minutes
+                    start_ts = end - 80 * 60  # last 80 minutes (raised from 40 to better cover long disconnects)
 
                     def _refill_one(symbol):
                         try:

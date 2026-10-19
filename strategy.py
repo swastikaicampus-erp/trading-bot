@@ -56,30 +56,30 @@ DEFAULT_CONFIG = {
     "fast_ema": 9,
     "slow_ema": 21,
 
-    # momentum filter -- LONG (widened band so momentum moves aren't instantly rejected)
+    # momentum filter -- LONG (tightened band: floor raised 35→45, ceiling lowered 75→70 to avoid late entries)
     "rsi_period": 14,
-    "rsi_floor": 35,
-    "rsi_overbought": 75,
+    "rsi_floor": 45,
+    "rsi_overbought": 70,
 
-    # momentum filter -- SHORT
-    "rsi_short_floor": 15,
+    # momentum filter -- SHORT (floor raised 15→25 to avoid shorting already-oversold markets)
+    "rsi_short_floor": 25,
     "rsi_short_ceiling": 65,
 
-    # trend filter (ADX threshold 22 for healthy trend confirmation)
+    # trend filter (ADX threshold 25 + rising confirmation enabled for stronger trend quality)
     "adx_period": 14,
-    "adx_threshold": 22,
-    "require_adx_rising": False,
+    "adx_threshold": 25,
+    "require_adx_rising": True,   # enabled: entry only when ADX is actively rising (stronger momentum)
 
-    # microscopic EMA cross filter
-    "min_ema_separation_pct": 0.04,
+    # microscopic EMA cross filter (raised 0.04→0.08 to require stronger momentum)
+    "min_ema_separation_pct": 0.08,
 
-    # EMA cross lookback window (candles) — 8 candles
-    "cross_lookback_candles": 8,
+    # EMA cross lookback window (candles) — reduced 8→3 to avoid late entries (CRITICAL FIX)
+    "cross_lookback_candles": 3,
     "require_cross_confirmation": True,
 
-    # volume filter (1.0 = average volume confirmation)
+    # volume filter (raised 1.0→1.5 to require breakout-level volume confirmation)
     "volume_lookback": 20,
-    "volume_multiplier": 1.0,
+    "volume_multiplier": 1.5,
 
     # vwap filter
     "vwap_filter": True,
@@ -97,8 +97,8 @@ DEFAULT_CONFIG = {
     # ATR-based stops -- per-symbol volatility instead of fixed %
     "use_atr_stops": True,
     "atr_period": 14,
-    "atr_sl_mult": 1.3,
-    "atr_tp_mult": 3.8,
+    "atr_sl_mult": 1.5,   # raised 1.3→1.5 (more room for noise on 1m chart)
+    "atr_tp_mult": 2.8,   # reduced 3.8→2.8 (realistic TP — 3.8 was too far, position was never reaching it)
 
     # fees (Delta India taker ~0.05% each side -> ~0.10% round trip)
     "fee_rate_round_trip": 0.0010,
@@ -108,6 +108,8 @@ DEFAULT_CONFIG = {
     "allow_short": True,
 
     # symbol blacklist -- toxic or underperforming altcoins to skip
+    # [19-Oct-2026] Added TACUSD (-$0.67, 16.7% win), ARIAUSD (-$0.50, 25% win),
+    # DUSKUSD (-$0.39, 25% win), BTWUSD (-$0.26, 45.5% win) — all active losers from scan grid.
     "symbol_blacklist": [
         "VIRTUALUSD", "BASEDUSD", "LINKUSD", "ETHUSD", "DOGEUSD", "SAGAUSD", "PENDLEUSD", "BCHUSD", "POPCATUSD", "NEARUSD",
         "LTCUSD", "ARMBUSD", "BILLUSD", "REDUSD", "SPXUSD", "SUSHIUSD", "1000BONKUSD", "WDCBUSD",
@@ -120,22 +122,24 @@ DEFAULT_CONFIG = {
         "DASHUSD", "LISTAUSD", "SUIUSD", "ENAUSD", "DYDXUSD", "DOTUSD", "SOPHUSD", "HIVEUSD",
         "XRPUSD", "METAXUSD", "GOATUSD", "FILUSD",
         "SOLVUSD", "RSRUSD", "XAUTUSD", "SPCXXUSD", "TSLAXUSD", "NVDAXUSD", "GIGGLEUSD", "ALLOUSD",
+        # Added 19-Oct-2026 based on PnL analysis:
+        "TACUSD", "ARIAUSD", "DUSKUSD", "BTWUSD",
     ],
 
-    # minimum score threshold -- balance quality and trade frequency
-    "min_score_threshold": 0.55,
+    # minimum score threshold -- raised 0.55→0.65 to filter mediocre setups (quality > quantity)
+    "min_score_threshold": 0.65,
 
-    # portfolio-level limits (optimized for small account)
-    "max_trades_per_day": 8,
+    # portfolio-level limits (optimized for small account — reduced 8→6 trades/day for quality)
+    "max_trades_per_day": 6,
     "max_concurrent_trades": 2,
     "max_daily_trades_per_symbol": 2,
     "max_daily_losses_per_symbol": 2,
     # Absolute dollar loss circuit-breaker (legacy, for small accounts)
     "max_daily_loss": 5,
     # Percentage-of-capital circuit-breaker (takes precedence when set > 0)
-    # e.g. 5.0 = stop trading after losing 5% of current capital today
+    # e.g. 3.0 = stop trading after losing 3% of current capital today (tightened 5.0→3.0)
     # Set to 0 to disable and fall back to max_daily_loss (absolute $)
-    "max_daily_loss_pct": 5.0,
+    "max_daily_loss_pct": 3.0,
     # Max hold time (seconds) for recovered positions with no SL/TP in live mode
     "recovered_max_hold_sec": 3600,
 
@@ -143,20 +147,20 @@ DEFAULT_CONFIG = {
     "monitor_interval_sec": 10,
     "failed_retry_cooldown_sec": 1800,
 
-    # post-exit cooldown (seconds) -- 30 minutes (1800s) to allow healthy setups without over-waiting
-    "post_exit_cooldown_sec": 1800,
+    # post-exit cooldown (seconds) -- increased 1800s→3600s (1h) to reduce overtrading per symbol
+    "post_exit_cooldown_sec": 3600,
 
-    # Break-Even Stop Loss
+    # Break-Even Stop Loss (trigger lowered 1.8→1.5 to activate sooner and protect profits)
     "enable_breakeven_sl": True,
-    "breakeven_trigger_pct": 1.8,
+    "breakeven_trigger_pct": 1.5,
 
     # Bid-Ask Spread Filter -- reject entries if spread exceeds max threshold (%)
     "enable_spread_filter": True,
     "max_spread_pct": 0.15,
 
-    # Dynamic Trailing Stop Loss
+    # Dynamic Trailing Stop Loss (distance raised 1.2→1.6 to avoid premature wick-hits on 1m chart)
     "enable_trailing_sl": True,
-    "trailing_distance_pct": 1.2,
+    "trailing_distance_pct": 1.6,
     "trailing_step_pct": 0.3,
 
     # Multi-Timeframe (1-Hour) Trend Confirmation
@@ -169,10 +173,10 @@ DEFAULT_CONFIG = {
     "btc_dump_threshold_pct": 1.0,
     "btc_symbol": "BTCUSD",
 
-    # 2. Partial Take-Profit (40% exit at +1.4% profit)
+    # 2. Partial Take-Profit (50% exit at +1.2% profit — trigger lowered, ratio raised for more profit lock)
     "enable_partial_tp": True,
-    "partial_tp_trigger_pct": 1.4,
-    "partial_tp_ratio": 0.4,
+    "partial_tp_trigger_pct": 1.2,
+    "partial_tp_ratio": 0.5,
 
     # 3. VWAP Upper Band Overbought Filter (+1.5 StdDev)
     "enable_vwap_band_filter": True,
@@ -699,11 +703,12 @@ def compute_diagnostics(symbol, candles, config):
         rsi_score = 1.0 - min(abs(curr_rsi - rsi_mid) / rsi_span, 1.0)
 
         # Penalty if RSI already overextended (late entry buying top / shorting bottom)
+        # FIX: threshold updated 65→70 to match rsi_overbought config (was causing valid 65-70 entries to be penalised)
         extension_pen = 0.0
-        if direction == "long" and curr_rsi is not None and curr_rsi > 65:
-            extension_pen = min((curr_rsi - 65) / 25.0, 0.35)
-        elif direction == "short" and curr_rsi is not None and curr_rsi < 35:
-            extension_pen = min((35 - curr_rsi) / 25.0, 0.35)
+        if direction == "long" and curr_rsi is not None and curr_rsi > config.get("rsi_overbought", 70):
+            extension_pen = min((curr_rsi - config.get("rsi_overbought", 70)) / 25.0, 0.35)
+        elif direction == "short" and curr_rsi is not None and curr_rsi < config.get("rsi_short_floor", 25):
+            extension_pen = min((config.get("rsi_short_floor", 25) - curr_rsi) / 25.0, 0.35)
 
         raw = adx_score * 0.40 + vol_score * 0.30 + rsi_score * 0.30
         score = round(max(raw - extension_pen, 0.0), 4)
