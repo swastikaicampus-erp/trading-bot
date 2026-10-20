@@ -24,10 +24,10 @@ if "india.delta.exchange" in WS_URL:
 
 # Channel names for the new public WS endpoint
 WS_TICKER_CHANNEL = "ticker"                    # was "v2/ticker" on legacy endpoint
-RESOLUTION          = "1m"   # candle timeframe
-WS_CANDLE_CHANNEL = f"candlestick_{RESOLUTION}"  # unchanged, templated below
+RESOLUTION          = os.getenv("CANDLE_RESOLUTION", "5m")   # candle timeframe (switched to 5m for higher win rate & less noise)
+WS_CANDLE_CHANNEL = f"candlestick_{RESOLUTION}"
 
-BACKFILL_MINUTES    = 200    # past candles to preload per symbol
+BACKFILL_CANDLES    = 200    # past candles to preload per symbol
 SUBSCRIBE_CHUNK_SIZE = 25   # small chunks to avoid oversized WS frames
 
 # Derive candle period in seconds from RESOLUTION so _norm_ts bucket-rounding
@@ -40,7 +40,7 @@ def _parse_resolution_sec(res: str) -> int:
             return int(res[:-1]) * 3600
     except (ValueError, AttributeError):
         pass
-    return 60  # safe fallback
+    return 300  # safe fallback for 5m
 _RESOLUTION_SEC = _parse_resolution_sec(RESOLUTION)
 
 # ---------------------------------------------------------------------------
@@ -268,7 +268,7 @@ class MarketDataFeed:
 
     def _backfill_one(self, symbol):
         end = int(time.time())
-        start = end - BACKFILL_MINUTES * 60
+        start = end - BACKFILL_CANDLES * _RESOLUTION_SEC
         try:
             r = requests.get(
                 f"{REST_BASE}/v2/history/candles",
@@ -414,7 +414,7 @@ class MarketDataFeed:
                     syms = self.get_symbols()
                     print(f"[market_data] reconnect backfill: refreshing last 80 candles for {len(syms)} symbols (parallel)")
                     end = int(time.time())
-                    start_ts = end - 80 * 60  # last 80 minutes (raised from 40 to better cover long disconnects)
+                    start_ts = end - 80 * _RESOLUTION_SEC  # last 80 candles dynamically scaled
 
                     def _refill_one(symbol):
                         try:

@@ -70,14 +70,14 @@ DEFAULT_CONFIG = {
     "adx_threshold": 22,
     "require_adx_rising": False,   # soft momentum: allows fresh crosses to establish momentum
 
-    # microscopic EMA cross filter (0.04 separation allows fresh crossovers without deadlock)
-    "min_ema_separation_pct": 0.04,
+    # microscopic EMA cross filter (0.05% separation ensures clear trend divergence on 5m)
+    "min_ema_separation_pct": 0.05,
 
-    # EMA cross lookback window (candles) — 5 candles gives time for EMA separation
-    "cross_lookback_candles": 5,
+    # EMA cross lookback window (candles) — 3 candles on 5m = 15 minutes window
+    "cross_lookback_candles": 3,
     "require_cross_confirmation": True,
 
-    # volume filter (1.15 = 15% above 20-candle average for genuine breakout)
+    # volume filter (1.15 = 15% above 20-candle average on 5m)
     "volume_lookback": 20,
     "volume_multiplier": 1.15,
 
@@ -91,14 +91,14 @@ DEFAULT_CONFIG = {
 
     # --- stop / target ---------------------------------------------------
     # fixed-% fallback (used when use_atr_stops is False or ATR unavailable)
-    "stop_loss_pct": 1.2,
-    "target_pct": 4.2,
+    "stop_loss_pct": 1.5,
+    "target_pct": 4.5,
 
     # ATR-based stops -- per-symbol volatility instead of fixed %
     "use_atr_stops": True,
     "atr_period": 14,
-    "atr_sl_mult": 1.5,   # room for 1m noise
-    "atr_tp_mult": 2.8,   # realistic target
+    "atr_sl_mult": 1.5,   # 1.5x ATR on 5m gives strong breathing room
+    "atr_tp_mult": 2.8,   # 2.8x ATR target
 
     # fees (Delta India taker ~0.05% each side -> ~0.10% round trip)
     "fee_rate_round_trip": 0.0010,
@@ -126,7 +126,7 @@ DEFAULT_CONFIG = {
         "TACUSD", "ARIAUSD", "DUSKUSD", "BTWUSD",
     ],
 
-    # minimum score threshold -- balanced at 0.58 (captures quality setups without choking scanner)
+    # minimum score threshold -- balanced at 0.58 on 5m
     "min_score_threshold": 0.58,
 
     # portfolio-level limits (optimized for small ~$19 account: 1 concurrent, max 4 trades/day)
@@ -141,27 +141,27 @@ DEFAULT_CONFIG = {
     "max_daily_loss_pct": 4.0,
     # Max risk cap for a single trade (3.5% of capital) to accommodate min 1 contract on small account
     "max_single_trade_loss_pct": 3.5,
-    # Max hold time (seconds) for recovered positions with no SL/TP in live mode
-    "recovered_max_hold_sec": 3600,
+    # Max hold time (seconds) for recovered positions with no SL/TP in live mode (4 hours on 5m)
+    "recovered_max_hold_sec": 14400,
 
     "scan_interval_sec": 5,
     "monitor_interval_sec": 10,
     "failed_retry_cooldown_sec": 1800,
 
-    # post-exit cooldown (seconds) -- 3600s (1h) to prevent churn
-    "post_exit_cooldown_sec": 3600,
+    # post-exit cooldown (seconds) -- 1800s (30m) on 5m timeframe
+    "post_exit_cooldown_sec": 1800,
 
-    # Break-Even Stop Loss (trigger lowered 1.8→1.5 to activate sooner and protect profits)
+    # Break-Even Stop Loss (trigger 1.8% on 5m)
     "enable_breakeven_sl": True,
-    "breakeven_trigger_pct": 1.5,
+    "breakeven_trigger_pct": 1.8,
 
     # Bid-Ask Spread Filter -- reject entries if spread exceeds max threshold (%)
     "enable_spread_filter": True,
     "max_spread_pct": 0.15,
 
-    # Dynamic Trailing Stop Loss (distance 1.8% to give runner position breathing room)
+    # Dynamic Trailing Stop Loss (distance 2.0% for 5m candle room)
     "enable_trailing_sl": True,
-    "trailing_distance_pct": 1.8,
+    "trailing_distance_pct": 2.0,
     "trailing_step_pct": 0.3,
 
     # Multi-Timeframe (1-Hour) Trend Confirmation
@@ -174,9 +174,9 @@ DEFAULT_CONFIG = {
     "btc_dump_threshold_pct": 1.0,
     "btc_symbol": "BTCUSD",
 
-    # 2. Partial Take-Profit (40% exit at +1.5% profit, 60% runner continues)
+    # 2. Partial Take-Profit (40% exit at +1.8% profit, 60% runner continues)
     "enable_partial_tp": True,
-    "partial_tp_trigger_pct": 1.5,
+    "partial_tp_trigger_pct": 1.8,
     "partial_tp_ratio": 0.4,
 
     # 3. VWAP Upper Band Overbought Filter (+1.5 StdDev)
