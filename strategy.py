@@ -65,29 +65,29 @@ DEFAULT_CONFIG = {
     "rsi_short_floor": 25,
     "rsi_short_ceiling": 65,
 
-    # trend filter (ADX threshold 25 + rising confirmation enabled for stronger trend quality)
+    # trend filter (ADX threshold 22, balanced trend confirmation)
     "adx_period": 14,
-    "adx_threshold": 25,
-    "require_adx_rising": True,   # enabled: entry only when ADX is actively rising (stronger momentum)
+    "adx_threshold": 22,
+    "require_adx_rising": False,   # soft momentum: allows fresh crosses to establish momentum
 
-    # microscopic EMA cross filter (raised 0.04→0.08 to require stronger momentum)
-    "min_ema_separation_pct": 0.08,
+    # microscopic EMA cross filter (0.04 separation allows fresh crossovers without deadlock)
+    "min_ema_separation_pct": 0.04,
 
-    # EMA cross lookback window (candles) — reduced 8→3 to avoid late entries (CRITICAL FIX)
-    "cross_lookback_candles": 3,
+    # EMA cross lookback window (candles) — 5 candles gives time for EMA separation
+    "cross_lookback_candles": 5,
     "require_cross_confirmation": True,
 
-    # volume filter (raised 1.0→1.5 to require breakout-level volume confirmation)
+    # volume filter (1.15 = 15% above 20-candle average for genuine breakout)
     "volume_lookback": 20,
-    "volume_multiplier": 1.5,
+    "volume_multiplier": 1.15,
 
     # vwap filter
     "vwap_filter": True,
 
-    # position sizing -- risk-based
+    # position sizing -- risk-based (tuned for small ~$19-$50 account)
     "capital": 50000,
-    "risk_pct": 1.0,
-    "max_leverage": 3,
+    "risk_pct": 2.5,
+    "max_leverage": 2,
 
     # --- stop / target ---------------------------------------------------
     # fixed-% fallback (used when use_atr_stops is False or ATR unavailable)
@@ -97,8 +97,8 @@ DEFAULT_CONFIG = {
     # ATR-based stops -- per-symbol volatility instead of fixed %
     "use_atr_stops": True,
     "atr_period": 14,
-    "atr_sl_mult": 1.5,   # raised 1.3→1.5 (more room for noise on 1m chart)
-    "atr_tp_mult": 2.8,   # reduced 3.8→2.8 (realistic TP — 3.8 was too far, position was never reaching it)
+    "atr_sl_mult": 1.5,   # room for 1m noise
+    "atr_tp_mult": 2.8,   # realistic target
 
     # fees (Delta India taker ~0.05% each side -> ~0.10% round trip)
     "fee_rate_round_trip": 0.0010,
@@ -126,20 +126,21 @@ DEFAULT_CONFIG = {
         "TACUSD", "ARIAUSD", "DUSKUSD", "BTWUSD",
     ],
 
-    # minimum score threshold -- raised 0.55→0.65 to filter mediocre setups (quality > quantity)
-    "min_score_threshold": 0.65,
+    # minimum score threshold -- balanced at 0.58 (captures quality setups without choking scanner)
+    "min_score_threshold": 0.58,
 
-    # portfolio-level limits (optimized for small account — reduced 8→6 trades/day for quality)
-    "max_trades_per_day": 6,
-    "max_concurrent_trades": 2,
+    # portfolio-level limits (optimized for small ~$19 account: 1 concurrent, max 4 trades/day)
+    "max_trades_per_day": 4,
+    "max_concurrent_trades": 1,
     "max_daily_trades_per_symbol": 2,
     "max_daily_losses_per_symbol": 2,
     # Absolute dollar loss circuit-breaker (legacy, for small accounts)
     "max_daily_loss": 5,
     # Percentage-of-capital circuit-breaker (takes precedence when set > 0)
-    # e.g. 3.0 = stop trading after losing 3% of current capital today (tightened 5.0→3.0)
-    # Set to 0 to disable and fall back to max_daily_loss (absolute $)
-    "max_daily_loss_pct": 3.0,
+    # e.g. 4.0 = stop trading after losing 4% of current capital today
+    "max_daily_loss_pct": 4.0,
+    # Max risk cap for a single trade (3.5% of capital) to accommodate min 1 contract on small account
+    "max_single_trade_loss_pct": 3.5,
     # Max hold time (seconds) for recovered positions with no SL/TP in live mode
     "recovered_max_hold_sec": 3600,
 
@@ -147,7 +148,7 @@ DEFAULT_CONFIG = {
     "monitor_interval_sec": 10,
     "failed_retry_cooldown_sec": 1800,
 
-    # post-exit cooldown (seconds) -- increased 1800s→3600s (1h) to reduce overtrading per symbol
+    # post-exit cooldown (seconds) -- 3600s (1h) to prevent churn
     "post_exit_cooldown_sec": 3600,
 
     # Break-Even Stop Loss (trigger lowered 1.8→1.5 to activate sooner and protect profits)
@@ -158,9 +159,9 @@ DEFAULT_CONFIG = {
     "enable_spread_filter": True,
     "max_spread_pct": 0.15,
 
-    # Dynamic Trailing Stop Loss (distance raised 1.2→1.6 to avoid premature wick-hits on 1m chart)
+    # Dynamic Trailing Stop Loss (distance 1.8% to give runner position breathing room)
     "enable_trailing_sl": True,
-    "trailing_distance_pct": 1.6,
+    "trailing_distance_pct": 1.8,
     "trailing_step_pct": 0.3,
 
     # Multi-Timeframe (1-Hour) Trend Confirmation
@@ -173,10 +174,10 @@ DEFAULT_CONFIG = {
     "btc_dump_threshold_pct": 1.0,
     "btc_symbol": "BTCUSD",
 
-    # 2. Partial Take-Profit (50% exit at +1.2% profit — trigger lowered, ratio raised for more profit lock)
+    # 2. Partial Take-Profit (40% exit at +1.5% profit, 60% runner continues)
     "enable_partial_tp": True,
-    "partial_tp_trigger_pct": 1.2,
-    "partial_tp_ratio": 0.5,
+    "partial_tp_trigger_pct": 1.5,
+    "partial_tp_ratio": 0.4,
 
     # 3. VWAP Upper Band Overbought Filter (+1.5 StdDev)
     "enable_vwap_band_filter": True,
@@ -210,7 +211,7 @@ EDITABLE_CONFIG_KEYS = [
     "min_score_threshold",
     "max_trades_per_day", "max_concurrent_trades",
     "max_daily_trades_per_symbol", "max_daily_losses_per_symbol",
-    "max_daily_loss", "max_daily_loss_pct", "recovered_max_hold_sec",
+    "max_daily_loss", "max_daily_loss_pct", "max_single_trade_loss_pct", "recovered_max_hold_sec",
     "scan_interval_sec", "monitor_interval_sec",
     "failed_retry_cooldown_sec", "post_exit_cooldown_sec", "dry_run_max_hold_sec",
     "enable_breakeven_sl", "breakeven_trigger_pct",
@@ -844,6 +845,7 @@ class StrategyManager:
         "max_leverage":           (1,    10),
         "max_daily_loss":         (1.0,  10000.0),
         "max_daily_loss_pct":     (0.5,  20.0),
+        "max_single_trade_loss_pct": (0.5, 10.0),
         "stop_loss_pct":          (0.3,  5.0),
         "target_pct":             (0.3,  15.0),
         "atr_sl_mult":            (0.5,  5.0),
@@ -1525,17 +1527,26 @@ class StrategyManager:
         qty = max(int(risk_amount // loss_per_contract), 1) if loss_per_contract > 0 else 1
 
         if loss_per_contract > 0 and 1 * loss_per_contract > risk_amount:
-            logger.warning(
-                "Skipping entry for %s: min 1 contract risk (%.2f) exceeds risk budget (%.2f)",
-                symbol, loss_per_contract, risk_amount,
-            )
-            with self.lock:
-                self.failed_symbols[symbol] = (time.time(), "fail")
-            self._log_trade(
-                "ENTRY_SKIPPED", symbol, entry_price, 0, sig,
-                {"error": f"min contract risk {loss_per_contract:.4f} > budget {risk_amount:.4f}"}
-            )
-            return
+            max_single_loss = capital * (float(self.config.get("max_single_trade_loss_pct", 3.5) or 3.5) / 100.0)
+            if 1 * loss_per_contract <= max_single_loss:
+                # Small account tolerance: allow 1 contract if risk is within safe hard loss cap
+                qty = 1
+                logger.info(
+                    "Small account tolerance for %s: 1 contract risk (%.4f) > budget (%.4f), but within hard cap (%.4f) — allowing 1 contract",
+                    symbol, loss_per_contract, risk_amount, max_single_loss,
+                )
+            else:
+                logger.warning(
+                    "Skipping entry for %s: min 1 contract risk (%.2f) exceeds max single-trade cap (%.2f) [budget=%.2f]",
+                    symbol, loss_per_contract, max_single_loss, risk_amount,
+                )
+                with self.lock:
+                    self.failed_symbols[symbol] = (time.time(), "fail")
+                self._log_trade(
+                    "ENTRY_SKIPPED", symbol, entry_price, 0, sig,
+                    {"error": f"min contract risk {loss_per_contract:.4f} > max single cap {max_single_loss:.4f}"}
+                )
+                return
 
         notional_per_contract = entry_price * contract_value
 
