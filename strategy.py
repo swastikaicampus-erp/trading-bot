@@ -124,6 +124,8 @@ DEFAULT_CONFIG = {
         "SOLVUSD", "RSRUSD", "XAUTUSD", "SPCXXUSD", "TSLAXUSD", "NVDAXUSD", "GIGGLEUSD", "ALLOUSD",
         # Added 19-Oct-2026 based on PnL analysis:
         "TACUSD", "ARIAUSD", "DUSKUSD", "BTWUSD",
+        # Added 22-Oct-2026 based on PnL report (-$0.54 loss, 33% win rate):
+        "AAOIBUSD",
     ],
 
     # minimum score threshold -- balanced at 0.58 on 5m

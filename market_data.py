@@ -323,11 +323,11 @@ class MarketDataFeed:
     def _watchdog_loop(self):
         while self._running:
             time.sleep(15)
-            if self._last_msg_ts and (time.time() - self._last_msg_ts > 60):
+            if self._last_msg_ts and (time.time() - self._last_msg_ts > 90):
                 with self._ws_lock:
                     ws = self._ws
                 if ws:
-                    print("[market_data] Watchdog: No WS message received for >60s! Forcing WS reconnect...")
+                    print("[market_data] Watchdog: No WS message received for >90s! Forcing WS reconnect...")
                     try:
                         ws.close()
                     except Exception:
