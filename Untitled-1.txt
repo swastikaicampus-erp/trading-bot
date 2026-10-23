@@ -27,3 +27,55 @@ python3 check_pnl.py
 
 # Real-time logs
 pm2 logs delta-service --lines 30
+
+
+
+
+
+
+curl -s http://localhost:5002/strategy/status | python3 -c "import sys, json; d=json.load(sys.stdin).get('data', {}); print('Running:', d.get('running')); print('Scan Grid symbols count:', len(d.get('scan_grid', []))); print('Top 5 Symbols:', [s.get('symbol') for s in d.get('scan_grid', [])][:5])"
+
+
+pm2 logs delta-service --lines 30 --nostream
+
+
+
+
+curl -s http://localhost:5002/strategy/status | python3 -c "import sys, json; d=json.load(sys.stdin).get('data', {}); print('Active Trades:', d.get('active_trades_count')); print('Top Candidates:', [(s['symbol'], s['score'], s['direction']) for s in d.get('candidates', [])])"
+pm2 logs delta-service --lines 30 --nostream
+python3 check_pnl.py
+
+
+# Check open positions
+curl -s http://localhost:5002/strategy/status | python3 -c "import sys, json; print(json.dumps(json.load(sys.stdin), indent=2))"
+
+
+# Debug: dump ALL candidates from live status endpoint (not just top 5)
+curl http://localhost:5002/strategy/status | python3 -m json.tool
+
+
+# Debug: check if config is loaded correctly
+curl http://localhost:5002/strategy/status | python3 -c "import sys, json; d=json.load(sys.stdin)['data']; print('Dry Run:', d.get('dry_run')); print('Capital:', d.get('capital')); print('Risk Pct:', d.get('risk_pct')); print('Max Leverage:', d.get('max_leverage'))"
+
+
+
+
+python3 check_pnl.py
+
+curl -s http://localhost:5002/strategy/status | python3 -c "import sys, json; d=json.load(sys.stdin).get('data', {}); print('Active Trades:', d.get('active_trades_count')); print('Top Candidates:', [(s['symbol'], s['score'], s['direction']) for s in d.get('candidates', [])])"
+
+curl -X DELETE http://localhost:5002/strategy/reset
+
+
+# Debug: check open positions
+curl http://localhost:5002/strategy/status | python3 -c "import sys, json; print(json.dumps(json.load(sys.stdin), indent=2))"
+
+# Debug: show all trades
+cat delta_strategy_trades.json
+
+
+
+# Kill the process and restart manually
+ps aux | grep delta-service
+kill <PID>
+python3 delta_service.py

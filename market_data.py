@@ -83,9 +83,9 @@ def discover_perpetual_futures_symbols(quote_assets={"USD"}, max_symbols=None, b
         blacklist = []
     if max_symbols is None:
         try:
-            max_symbols = int(os.getenv("MAX_SYMBOLS", "30"))
+            max_symbols = int(os.getenv("MAX_SYMBOLS", "15"))
         except (TypeError, ValueError):
-            max_symbols = 30
+            max_symbols = 15
     resp = requests.get(f"{REST_BASE}/v2/products", timeout=15)
     resp.raise_for_status()
     rows = resp.json().get("result", [])
@@ -102,6 +102,9 @@ def discover_perpetual_futures_symbols(quote_assets={"USD"}, max_symbols=None, b
             continue
         symbol = row.get("symbol")
         if not symbol or symbol in blacklist:
+            continue
+        # Skip tokenized equities / stock futures (e.g. ORCLBUSD, EWYBUSD, KORUBUSD)
+        if symbol.endswith("BUSD") and symbol != "BTCUSD":
             continue
         if quote_assets:
             quoting = (row.get("quoting_asset") or {}).get("symbol")

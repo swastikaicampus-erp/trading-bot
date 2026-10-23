@@ -56,10 +56,10 @@ DEFAULT_CONFIG = {
     "fast_ema": 9,
     "slow_ema": 21,
 
-    # momentum filter -- LONG (tightened band: floor raised 35→45, ceiling lowered 75→70 to avoid late entries)
+    # momentum filter -- LONG (tightened band: floor raised 35→45, ceiling lowered 70→65 to avoid buying overbought tops)
     "rsi_period": 14,
     "rsi_floor": 45,
-    "rsi_overbought": 70,
+    "rsi_overbought": 65,
 
     # momentum filter -- SHORT (floor raised 15→25 to avoid shorting already-oversold markets)
     "rsi_short_floor": 25,
@@ -73,8 +73,8 @@ DEFAULT_CONFIG = {
     # microscopic EMA cross filter (0.05% separation ensures clear trend divergence on 5m)
     "min_ema_separation_pct": 0.05,
 
-    # EMA cross lookback window (candles) — 3 candles on 5m = 15 minutes window
-    "cross_lookback_candles": 3,
+    # EMA cross lookback window (candles) — 1 candle on 5m = instant breakout entry (zero lag)
+    "cross_lookback_candles": 1,
     "require_cross_confirmation": True,
 
     # volume filter (1.15 = 15% above 20-candle average on 5m)
@@ -126,13 +126,15 @@ DEFAULT_CONFIG = {
         "TACUSD", "ARIAUSD", "DUSKUSD", "BTWUSD",
         # Added 22-Oct-2026 based on PnL report (-$0.54 loss, 33% win rate):
         "AAOIBUSD",
+        # Added 23-Oct-2026: Illiquid stock synthetic tokens & toxic losers:
+        "ORCLBUSD", "EWYBUSD", "KORUBUSD", "NMRUSD", "QNTUSD", "MSFTBUSD", "AMDBUSD",
     ],
 
-    # minimum score threshold -- balanced at 0.58 on 5m
-    "min_score_threshold": 0.58,
+    # minimum score threshold -- raised to 0.68 for prime A+ setups only
+    "min_score_threshold": 0.68,
 
-    # portfolio-level limits (optimized for small ~$19 account: 1 concurrent, max 4 trades/day)
-    "max_trades_per_day": 4,
+    # portfolio-level limits (optimized for small ~$19 account: 1 concurrent, max 3 high-quality trades/day)
+    "max_trades_per_day": 3,
     "max_concurrent_trades": 1,
     "max_daily_trades_per_symbol": 2,
     "max_daily_losses_per_symbol": 2,
@@ -153,13 +155,13 @@ DEFAULT_CONFIG = {
     # post-exit cooldown (seconds) -- 1800s (30m) on 5m timeframe
     "post_exit_cooldown_sec": 1800,
 
-    # Break-Even Stop Loss (trigger 1.8% on 5m)
+    # Break-Even Stop Loss (trigger 2.4% on 5m to give runners breathing room)
     "enable_breakeven_sl": True,
-    "breakeven_trigger_pct": 1.8,
+    "breakeven_trigger_pct": 2.4,
 
     # Bid-Ask Spread Filter -- reject entries if spread exceeds max threshold (%)
     "enable_spread_filter": True,
-    "max_spread_pct": 0.15,
+    "max_spread_pct": 0.08,
 
     # Dynamic Trailing Stop Loss (distance 2.0% for 5m candle room)
     "enable_trailing_sl": True,
@@ -176,10 +178,10 @@ DEFAULT_CONFIG = {
     "btc_dump_threshold_pct": 1.0,
     "btc_symbol": "BTCUSD",
 
-    # 2. Partial Take-Profit (40% exit at +1.8% profit, 60% runner continues)
+    # 2. Partial Take-Profit (60% exit at +2.0% profit, 40% runner continues)
     "enable_partial_tp": True,
-    "partial_tp_trigger_pct": 1.8,
-    "partial_tp_ratio": 0.4,
+    "partial_tp_trigger_pct": 2.0,
+    "partial_tp_ratio": 0.6,
 
     # 3. VWAP Upper Band Overbought Filter (+1.5 StdDev)
     "enable_vwap_band_filter": True,
