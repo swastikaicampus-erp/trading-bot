@@ -326,11 +326,11 @@ class MarketDataFeed:
     def _watchdog_loop(self):
         while self._running:
             time.sleep(15)
-            if self._last_msg_ts and (time.time() - self._last_msg_ts > 90):
+            if self._last_msg_ts and (time.time() - self._last_msg_ts > 120):
                 with self._ws_lock:
                     ws = self._ws
                 if ws:
-                    print("[market_data] Watchdog: No WS message received for >90s! Forcing WS reconnect...")
+                    print("[market_data] Watchdog: No WS message received for >120s! Forcing WS reconnect...")
                     try:
                         ws.close()
                     except Exception:
@@ -389,6 +389,7 @@ class MarketDataFeed:
         ws.send(json.dumps(payload))
 
     def _on_open(self, ws):
+        self._last_msg_ts = time.time()  # reset watchdog timestamp on fresh connect
         symbols = self.get_symbols()   # always subscribes to the CURRENT list
         connect_num = self._connect_count  # snapshot under ws_lock already incremented
         print(f"[market_data] ws connected (#{connect_num}), subscribing {len(symbols)} symbols in chunks of {SUBSCRIBE_CHUNK_SIZE}")
