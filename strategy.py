@@ -90,8 +90,9 @@ DEFAULT_CONFIG = {
     # vwap filter
     "vwap_filter": True,
 
-    # position sizing -- risk-based (tuned for small ~$19-$50 account)
-    "capital": 50000,
+    # position sizing -- risk-based (tuned for $50 USD paper trading or small account)
+    "dry_run_capital": 50.0,
+    "capital": 50.0,
     "risk_pct": 2.5,
     "max_leverage": 2,
 
@@ -152,12 +153,11 @@ DEFAULT_CONFIG = {
     "max_concurrent_trades": 1,
     "max_daily_trades_per_symbol": 2,
     "max_daily_losses_per_symbol": 1,  # [29-Oct-2026] tightened 2→1: stop a symbol after 1 loss/day
-    # Absolute dollar loss circuit-breaker (legacy, for small accounts)
-    "max_daily_loss": 5,
-    # Percentage-of-capital circuit-breaker — [29-Oct-2026] tightened 4.0→2.5%
-    # 4% daily loss cap was too wide. 2.5% protects capital while allowing 3 trades.
-    "max_daily_loss_pct": 2.5,
-    # Max risk cap for a single trade (3.5% of capital) to accommodate min 1 contract on small account
+    # Absolute dollar loss circuit-breaker
+    "max_daily_loss": 3.0,
+    # Percentage-of-capital circuit-breaker — 5.0% for $50 capital ($2.50 daily cap = 2 losses allowed)
+    "max_daily_loss_pct": 5.0,
+    # Max risk cap for a single trade (3.5% of capital = $1.75 on $50 capital)
     "max_single_trade_loss_pct": 3.5,
     # Max hold time (seconds) for recovered positions with no SL/TP in live mode (4 hours on 5m)
     "recovered_max_hold_sec": 14400,
@@ -223,7 +223,7 @@ EDITABLE_CONFIG_KEYS = [
     "adx_period", "adx_threshold", "require_adx_rising", "min_ema_separation_pct",
     "cross_lookback_candles", "require_cross_confirmation",
     "volume_lookback", "volume_multiplier",
-    "vwap_filter", "capital", "risk_pct",
+    "vwap_filter", "capital", "dry_run_capital", "risk_pct",
     "stop_loss_pct", "target_pct",
     "use_atr_stops", "atr_period", "atr_sl_mult", "atr_tp_mult",
     "max_leverage", "fee_rate_round_trip",
@@ -861,6 +861,8 @@ class StrategyManager:
     # These prevent dangerous API calls from setting e.g. risk_pct=100
     # or max_leverage=200 which would cause immediate liquidation.
     _CONFIG_CLAMPS = {
+        "capital":                (1.0,  1000000.0),
+        "dry_run_capital":        (1.0,  1000000.0),
         "risk_pct":               (0.1,  5.0),
         "max_leverage":           (1,    10),
         "max_daily_loss":         (1.0,  10000.0),
@@ -912,11 +914,14 @@ class StrategyManager:
             self.realized_pnl_today = 0.0
             self.circuit_broken = False
             # Refresh capital baseline from live equity at day-start so circuit
-            # breaker uses today's actual equity, not a stale config value.
-            live_eq = self._get_live_available_margin()
-            if live_eq and live_eq > 0:
-                self.config["capital"] = live_eq
-                logger.info("Day-roll: capital updated to live equity %.2f for circuit-breaker", live_eq)
+            # breaker uses today's actual equity in live mode, or dry_run_capital in paper trade.
+            if not self.config.get("dry_run", True):
+                live_eq = self._get_live_available_margin()
+                if live_eq and live_eq > 0:
+                    self.config["capital"] = live_eq
+                    logger.info("Day-roll: capital updated to live equity %.2f for circuit-breaker", live_eq)
+            else:
+                self.config["capital"] = float(self.config.get("dry_run_capital", 50.0))
 
     def _prune_failed_symbols(self):
         fail_cd = self.config.get("failed_retry_cooldown_sec", 1800)
@@ -1293,8 +1298,8 @@ class StrategyManager:
                 # max_daily_loss (absolute $) when set to a value > 0.
                 daily_loss_pct = float(self.config.get("max_daily_loss_pct", 0) or 0)
                 if daily_loss_pct > 0:
-                    capital = float(self.config.get("capital", 50000))
-                    loss_limit = -(capital * daily_loss_pct / 100.0)
+                    cap_val = float(self.config.get("dry_run_capital", 50.0)) if self.config.get("dry_run", True) else float(self.config.get("capital", 50.0))
+                    loss_limit = -(cap_val * daily_loss_pct / 100.0)
                 else:
                     loss_limit = -abs(self.config["max_daily_loss"])
                 loss_ok = (not self.circuit_broken) and realized > loss_limit
@@ -1525,15 +1530,20 @@ class StrategyManager:
         entry_price = sig["price"]
 
         # Dynamic available margin sync right before trade placement
-        capital = float(self.config.get("capital", 50000))
-        avail_bal = self._get_live_available_margin()
-        if avail_bal is not None and avail_bal <= 0:
-            logger.warning("No available margin (%.4f) — skipping %s", avail_bal, symbol)
-            with self.lock:
-                self.failed_symbols[symbol] = (time.time(), "fail")
-            return
-        if avail_bal is not None and avail_bal > 0:
-            capital = avail_bal
+        if self.config.get("dry_run", True):
+            capital = float(self.config.get("dry_run_capital", 50.0))
+            self.config["capital"] = capital
+            avail_bal = capital  # virtual margin for dry run
+        else:
+            capital = float(self.config.get("capital", 50.0))
+            avail_bal = self._get_live_available_margin()
+            if avail_bal is not None and avail_bal <= 0:
+                logger.warning("No available margin (%.4f) — skipping %s", avail_bal, symbol)
+                with self.lock:
+                    self.failed_symbols[symbol] = (time.time(), "fail")
+                return
+            if avail_bal is not None and avail_bal > 0:
+                capital = avail_bal
 
         # FIX: Compute SL/TP FIRST using actual ATR or fixed-% distance,
         # then size risk off the REAL sl_move — not the fixed stop_loss_pct.
@@ -2323,8 +2333,8 @@ class StrategyManager:
             # when max_daily_loss_pct was set.
             daily_loss_pct = float(self.config.get("max_daily_loss_pct", 0) or 0)
             if daily_loss_pct > 0:
-                capital = float(self.config.get("capital", 50000))
-                loss_limit = -(capital * daily_loss_pct / 100.0)
+                cap_val = float(self.config.get("dry_run_capital", 50.0)) if self.config.get("dry_run", True) else float(self.config.get("capital", 50.0))
+                loss_limit = -(cap_val * daily_loss_pct / 100.0)
             else:
                 loss_limit = -abs(float(self.config.get("max_daily_loss", 1000.0) or 1000.0))
             if self.realized_pnl_today <= loss_limit:

@@ -42,6 +42,7 @@ app = Flask(__name__)
 CORS(app, origins=os.getenv("ALLOWED_ORIGINS", "*").split(","))
 
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
+DRY_RUN_CAPITAL = float(os.getenv("DRY_RUN_CAPITAL", "50.0"))
 WATCHLIST_FILE = "watchlist.json"
 
 
@@ -281,7 +282,9 @@ strategy = StrategyManager(
     client=client,
     watchlist=WATCHLIST,
     config={
-        "dry_run": DRY_RUN
+        "dry_run": DRY_RUN,
+        "dry_run_capital": DRY_RUN_CAPITAL,
+        "capital": DRY_RUN_CAPITAL if DRY_RUN else 50.0,
     },
     place_order_fn=_place_order_for_strategy,
     signed_request_fn=_signed_request,
@@ -292,8 +295,13 @@ _last_cap_sync = 0.0
 
 def _sync_capital_from_balance(force=False):
     """Best-effort: wallet available balance → strategy capital (risk sizing).
+    In paper trading (DRY_RUN=True), locks capital to DRY_RUN_CAPITAL ($50 USD).
     Includes a 20s throttle to avoid spamming signed REST requests on status polling."""
     global _last_cap_sync
+    if DRY_RUN:
+        strategy.config["capital"] = DRY_RUN_CAPITAL
+        strategy.config["dry_run_capital"] = DRY_RUN_CAPITAL
+        return
     if not force and time.time() - _last_cap_sync < 20:
         return
     _last_cap_sync = time.time()
