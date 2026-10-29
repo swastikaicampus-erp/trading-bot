@@ -373,6 +373,50 @@ def analyze_trades():
         wr = (wins_by_symbol[sym] / t_count * 100) if t_count else 0
         print(f"  {sym:<12} ${pnl:>9.4f} {t_count:>7}  {wr:>5.1f}%")
 
+    # ── Full trade-by-trade history ───────────────────────────────────────────
+    show_history = getattr(analyze_trades, "_show_history", False)
+    print(f"\n{sep}")
+    print(f"  FULL TRADE HISTORY  (chronological, all {total_completed} completed trades)")
+    print(sep)
+    print(f"  {'#':>4}  {'Symbol':<12} {'Dir':<5} {'Entry Time (UTC)':<20} {'Hold':<10} {'PnL':>9}  {'Result':<8}  {'Cum PnL':>9}")
+    print(f"  {'-'*4}  {'-'*12} {'-'*5} {'-'*20} {'-'*10} {'-'*9}  {'-'*8}  {'-'*9}")
+
+    # Sort completed trades by entry_time
+    def _entry_sort_key(ct):
+        et = ct.get("entry_time") or ct.get("exit_time") or ""
+        try:
+            return datetime.fromisoformat(et.replace("Z", "+00:00"))
+        except Exception:
+            return datetime.min.replace(tzinfo=timezone.utc)
+
+    sorted_trades = sorted(completed_trades, key=_entry_sort_key)
+    cumulative_pnl = 0.0
+    for i, ct in enumerate(sorted_trades, 1):
+        sym      = ct.get("symbol", "?")
+        dirn     = (ct.get("direction") or "?")[:5].upper()
+        et_raw   = ct.get("entry_time") or ""
+        hold     = _fmt_duration(ct.get("hold_sec"))
+        pnl_val  = ct.get("pnl", 0.0)
+        cumulative_pnl += pnl_val
+        result   = "✅ WIN" if pnl_val > 0 else ("❌ LOSS" if pnl_val < 0 else "➖ EVEN")
+        dry_tag  = "[D]" if ct.get("dry_run") else "[L]"
+
+        # Format entry time — keep only date + HH:MM
+        try:
+            et_dt = datetime.fromisoformat(et_raw.replace("Z", "+00:00"))
+            et_str = et_dt.strftime("%d-%b %H:%M")
+        except Exception:
+            et_str = et_raw[:16] if et_raw else "N/A"
+
+        has_ptp = ct.get("partial_tp_count", 0) > 0
+        ptp_tag = " +PTP" if has_ptp else "     "
+        print(
+            f"  {i:>4}  {sym:<12} {dry_tag}{dirn:<4} {et_str:<20} {hold:<10} "
+            f"${pnl_val:>8.4f}  {result:<8}  ${cumulative_pnl:>8.4f}{ptp_tag}"
+        )
+
+    print(f"\n  [D] = Dry-run trade   [L] = Live trade   +PTP = Had partial take-profit")
+    print(f"  Final cumulative PnL: ${cumulative_pnl:.4f}")
     print(f"\n{sep}")
     print("  NOTE: PnL = Strategy estimated PnL (gross price move - est. fees).")
     print("  This is NOT exchange-confirmed realized PnL. Verify via /fills.")
@@ -380,4 +424,9 @@ def analyze_trades():
 
 
 if __name__ == "__main__":
+    import sys
+    # Pass --history flag (or -h) to show full per-trade breakdown
+    # Usage: python3 check_pnl.py --history
+    analyze_trades._show_history = "--history" in sys.argv or "-h" in sys.argv
     analyze_trades()
+

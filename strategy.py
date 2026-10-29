@@ -56,19 +56,23 @@ DEFAULT_CONFIG = {
     "fast_ema": 9,
     "slow_ema": 21,
 
-    # momentum filter -- LONG (balanced band: floor 45 to ceiling 70 for healthy breakout entries)
+    # momentum filter -- LONG (floor 50 = confirmed bullish momentum zone, avoids sideways noise)
+    # [29-Oct-2026] Raised rsi_floor 45→50: RSI 45-50 is often a transition/sideways zone,
+    # 50+ confirms genuine bullish momentum and reduces fakeout entries.
     "rsi_period": 14,
-    "rsi_floor": 45,
+    "rsi_floor": 50,
     "rsi_overbought": 70,
 
     # momentum filter -- SHORT (floor raised 15→25 to avoid shorting already-oversold markets)
     "rsi_short_floor": 25,
-    "rsi_short_ceiling": 65,
+    "rsi_short_ceiling": 60,
 
-    # trend filter (ADX threshold 22, balanced trend confirmation)
+    # trend filter — [29-Oct-2026] ADX raised 22→25 + require_adx_rising=True
+    # At ADX 22, bot was entering ranging/sideways markets. ADX 25+ with rising
+    # momentum ensures we only trade in genuine, strengthening trends.
     "adx_period": 14,
-    "adx_threshold": 22,
-    "require_adx_rising": False,   # soft momentum: allows fresh crosses to establish momentum
+    "adx_threshold": 25,
+    "require_adx_rising": True,    # require momentum to be building, not fading
 
     # microscopic EMA cross filter (0.05% separation ensures clear trend divergence on 5m)
     "min_ema_separation_pct": 0.05,
@@ -77,9 +81,11 @@ DEFAULT_CONFIG = {
     "cross_lookback_candles": 3,
     "require_cross_confirmation": False,
 
-    # volume filter (1.15 = 15% above 20-candle average on 5m)
+    # volume filter — [29-Oct-2026] raised 1.15→1.30 (30% above average)
+    # 15% threshold was too permissive. 30% above average confirms genuine
+    # breakout volume and reduces low-conviction fakeout entries.
     "volume_lookback": 20,
-    "volume_multiplier": 1.15,
+    "volume_multiplier": 1.30,
 
     # vwap filter
     "vwap_filter": True,
@@ -97,8 +103,12 @@ DEFAULT_CONFIG = {
     # ATR-based stops -- per-symbol volatility instead of fixed %
     "use_atr_stops": True,
     "atr_period": 14,
-    "atr_sl_mult": 1.5,   # 1.5x ATR on 5m gives strong breathing room
-    "atr_tp_mult": 2.8,   # 2.8x ATR target
+    "atr_sl_mult": 1.5,   # 1.5x ATR SL — unchanged, gives breathing room
+    # [29-Oct-2026] TP multiplier raised 2.8→4.0:
+    # CORE FIX — realized RR was ~1.03:1 (breakeven needs 49% win rate).
+    # At 39% win rate, we need minimum 2.5:1 RR to be profitable.
+    # 4.0/1.5 = 2.67:1 theoretical RR. At 42%+ win rate → positive expectancy.
+    "atr_tp_mult": 4.0,
 
     # fees (Delta India taker ~0.05% each side -> ~0.10% round trip)
     "fee_rate_round_trip": 0.0010,
@@ -130,19 +140,23 @@ DEFAULT_CONFIG = {
         "ORCLBUSD", "EWYBUSD", "KORUBUSD", "NMRUSD", "QNTUSD", "MSFTBUSD", "AMDBUSD",
     ],
 
-    # minimum score threshold -- balanced at 0.58 on 5m
-    "min_score_threshold": 0.58,
+    # minimum score threshold — [29-Oct-2026] raised 0.58→0.62
+    # Higher bar = fewer but better quality setups. Caution: do NOT exceed 0.65
+    # (Oct-24 report showed 0.68 caused zero trades — mathematical impossibility).
+    "min_score_threshold": 0.62,
 
-    # portfolio-level limits (optimized for small ~$19 account: 1 concurrent, max 4 trades/day)
-    "max_trades_per_day": 4,
+    # portfolio-level limits — [29-Oct-2026] max_trades_per_day 4→3 (quality over quantity)
+    # With higher filters (ADX 25, RSI 50, Vol 1.3x), fewer signals will qualify.
+    # 3 trades/day is sufficient to build a clean dry-run sample.
+    "max_trades_per_day": 3,
     "max_concurrent_trades": 1,
     "max_daily_trades_per_symbol": 2,
-    "max_daily_losses_per_symbol": 2,
+    "max_daily_losses_per_symbol": 1,  # [29-Oct-2026] tightened 2→1: stop a symbol after 1 loss/day
     # Absolute dollar loss circuit-breaker (legacy, for small accounts)
     "max_daily_loss": 5,
-    # Percentage-of-capital circuit-breaker (takes precedence when set > 0)
-    # e.g. 4.0 = stop trading after losing 4% of current capital today
-    "max_daily_loss_pct": 4.0,
+    # Percentage-of-capital circuit-breaker — [29-Oct-2026] tightened 4.0→2.5%
+    # 4% daily loss cap was too wide. 2.5% protects capital while allowing 3 trades.
+    "max_daily_loss_pct": 2.5,
     # Max risk cap for a single trade (3.5% of capital) to accommodate min 1 contract on small account
     "max_single_trade_loss_pct": 3.5,
     # Max hold time (seconds) for recovered positions with no SL/TP in live mode (4 hours on 5m)
@@ -163,10 +177,12 @@ DEFAULT_CONFIG = {
     "enable_spread_filter": True,
     "max_spread_pct": 0.15,
 
-    # Dynamic Trailing Stop Loss (distance 2.0% for 5m candle room)
+    # Dynamic Trailing Stop Loss — [29-Oct-2026] tightened 2.0→1.2% distance
+    # Final exit PnL was -$5.61 while partial TP was +$0.47 — runners were
+    # giving back too much profit. 1.2% trailing keeps more profit locked in.
     "enable_trailing_sl": True,
-    "trailing_distance_pct": 2.0,
-    "trailing_step_pct": 0.3,
+    "trailing_distance_pct": 1.2,
+    "trailing_step_pct": 0.2,
 
     # Multi-Timeframe (1-Hour) Trend Confirmation
     "require_htf_trend": True,
