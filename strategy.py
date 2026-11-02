@@ -60,7 +60,7 @@ DEFAULT_CONFIG = {
     # [29-Oct-2026] Raised rsi_floor 45→50: RSI 45-50 is often a transition/sideways zone,
     # 50+ confirms genuine bullish momentum and reduces fakeout entries.
     "rsi_period": 14,
-    "rsi_floor": 50,
+    "rsi_floor": 45,  # [02-Nov-2026] Lowered 50->45: scan_grid ZENUSD RSI=48.49 had valid EMA cross but was blocked
     "rsi_overbought": 70,
 
     # momentum filter -- SHORT (floor raised 15→25 to avoid shorting already-oversold markets)
@@ -72,7 +72,7 @@ DEFAULT_CONFIG = {
     # momentum ensures we only trade in genuine, strengthening trends.
     "adx_period": 14,
     "adx_threshold": 25,
-    "require_adx_rising": True,    # require momentum to be building, not fading
+    "require_adx_rising": False,   # [02-Nov-2026] Relaxed True->False: ADX>=25 already filters ranging markets; rising filter was blocking 8/15 symbols in scan_grid
 
     # microscopic EMA cross filter (0.05% separation ensures clear trend divergence on 5m)
     "min_ema_separation_pct": 0.05,
@@ -85,7 +85,7 @@ DEFAULT_CONFIG = {
     # 15% threshold was too permissive. 30% above average confirms genuine
     # breakout volume and reduces low-conviction fakeout entries.
     "volume_lookback": 20,
-    "volume_multiplier": 1.30,
+    "volume_multiplier": 1.05,  # [02-Nov-2026] Lowered 1.30->1.05: 12/15 watchlist symbols had 0.0x volume (illiquid alts at off-peak hours)
 
     # vwap filter
     "vwap_filter": True,
@@ -144,7 +144,7 @@ DEFAULT_CONFIG = {
     # minimum score threshold — [29-Oct-2026] raised 0.58→0.62
     # Higher bar = fewer but better quality setups. Caution: do NOT exceed 0.65
     # (Oct-24 report showed 0.68 caused zero trades — mathematical impossibility).
-    "min_score_threshold": 0.62,
+    "min_score_threshold": 0.58,  # [02-Nov-2026] Lowered 0.62->0.58: balanced with relaxed filters above
 
     # portfolio-level limits — [29-Oct-2026] max_trades_per_day 4→3 (quality over quantity)
     # With higher filters (ADX 25, RSI 50, Vol 1.3x), fewer signals will qualify.
@@ -152,7 +152,7 @@ DEFAULT_CONFIG = {
     "max_trades_per_day": 3,
     "max_concurrent_trades": 1,
     "max_daily_trades_per_symbol": 2,
-    "max_daily_losses_per_symbol": 1,  # [29-Oct-2026] tightened 2→1: stop a symbol after 1 loss/day
+    "max_daily_losses_per_symbol": 2,  # [02-Nov-2026] Relaxed 1->2 for dry-run testing phase
     # Absolute dollar loss circuit-breaker
     "max_daily_loss": 3.0,
     # Percentage-of-capital circuit-breaker — 5.0% for $50 capital ($2.50 daily cap = 2 losses allowed)
@@ -167,7 +167,7 @@ DEFAULT_CONFIG = {
     "failed_retry_cooldown_sec": 1800,
 
     # post-exit cooldown (seconds) -- 1800s (30m) on 5m timeframe
-    "post_exit_cooldown_sec": 1800,
+    "post_exit_cooldown_sec": 900,  # [02-Nov-2026] Reduced 1800->900s (15 min) for 5m timeframe
 
     # Break-Even Stop Loss (trigger 2.4% on 5m to give runners breathing room)
     "enable_breakeven_sl": True,
@@ -212,7 +212,7 @@ DEFAULT_CONFIG = {
     "enable_funding_filter": True,
     "max_funding_rate_pct": 0.05,  # +0.05% max funding rate for long entries
 
-    "dry_run_max_hold_sec": 3600,
+    "dry_run_max_hold_sec": 7200,  # [02-Nov-2026] Extended 3600->7200s (2 hrs) so runners reach TP
 
     "dry_run": True,
 }

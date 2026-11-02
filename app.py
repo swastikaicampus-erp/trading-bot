@@ -5,6 +5,7 @@ import hmac
 import hashlib
 import socket
 import threading
+import logging
 from email.utils import parsedate_to_datetime
 
 import requests
@@ -17,6 +18,14 @@ from dotenv import load_dotenv
 from delta_rest_client import DeltaRestClient
 from market_data import MarketDataFeed, discover_perpetual_futures_symbols
 from strategy import StrategyManager
+
+# Configure standard logging so systemd/journalctl logs engine and feed events
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("delta-service-app")
 
 # ---------------------------------------------------------------------
 # IPv4-only enforcement (permanent fix for the overnight ENTRY_FAILED
