@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from delta_rest_client import DeltaRestClient
 from market_data import MarketDataFeed, discover_perpetual_futures_symbols
 from strategy import StrategyManager
+from funding_arbitrage import FundingArbitrageManager
 
 # Configure standard logging so systemd/journalctl logs engine and feed events
 logging.basicConfig(
@@ -299,6 +300,15 @@ strategy = StrategyManager(
     signed_request_fn=_signed_request,
 )
 
+
+# Funding Rate Arbitrage Engine (Delta Neutral Carry)
+funding_strategy = FundingArbitrageManager(
+    client=client,
+    config={
+        "dry_run": DRY_RUN,
+        "capital": 100.0,
+    }
+)
 
 _last_cap_sync = 0.0
 
@@ -1160,6 +1170,29 @@ def strategy_stop():
     strategy.stop()
     return jsonify({"success": True, "data": strategy.status()})
 
+
+
+@app.route("/funding-strategy/status", methods=["GET"])
+def funding_strategy_status():
+    return jsonify({"success": True, "data": funding_strategy.status()})
+
+
+@app.route("/funding-strategy/opportunities", methods=["GET"])
+def funding_strategy_opportunities():
+    status = funding_strategy.status()
+    return jsonify({"success": True, "data": status.get("top_opportunities", [])})
+
+
+@app.route("/funding-strategy/start", methods=["POST"])
+def funding_strategy_start():
+    funding_strategy.start()
+    return jsonify({"success": True, "data": funding_strategy.status()})
+
+
+@app.route("/funding-strategy/stop", methods=["POST"])
+def funding_strategy_stop():
+    funding_strategy.stop()
+    return jsonify({"success": True, "data": funding_strategy.status()})
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5002))

@@ -423,10 +423,62 @@ def analyze_trades():
     print(sep)
 
 
+
+
+FUNDING_TRADES_FILE = "delta_funding_trades.json"
+FUNDING_STATE_FILE = "delta_funding_state.json"
+
+
+def analyze_funding_arbitrage():
+    if not os.path.exists(FUNDING_TRADES_FILE) and not os.path.exists(FUNDING_STATE_FILE):
+        return
+
+    sep = "=" * 60
+    print(f"\n{sep}")
+    print("   STRATEGY #2: FUNDING RATE ARBITRAGE (DELTA NEUTRAL)")
+    print(sep)
+
+    open_pairs = {}
+    total_funding = 0.0
+    if os.path.exists(FUNDING_STATE_FILE):
+        try:
+            with open(FUNDING_STATE_FILE) as f:
+                state = json.load(f)
+                open_pairs = state.get("open_pairs", {})
+                total_funding = state.get("total_funding_earned", 0.0)
+        except Exception:
+            pass
+
+    print(f"\nACTIVE DELTA-NEUTRAL POSITIONS: {len(open_pairs)}")
+    if open_pairs:
+        print(f"  {'SYMBOL':<12} {'SIZE ($)':<10} {'ENTRY RATE':<14} {'APR':<10} {'ACCUMULATED':<12}")
+        print("  " + "-" * 58)
+        for sym, pos in open_pairs.items():
+            print(f"  {sym:<12} ${pos.get('size_usd', 0):<9.1f} +{pos.get('entry_funding_rate_pct', 0):.4f}%/8h  {pos.get('entry_apr_pct', 0):>6.1f}%  +${pos.get('accumulated_funding', 0):.4f}")
+
+    if os.path.exists(FUNDING_TRADES_FILE):
+        try:
+            with open(FUNDING_TRADES_FILE) as f:
+                records = json.load(f)
+            payouts = [r for r in records if r.get("action") == "FUNDING_PAYOUT"]
+            exits = [r for r in records if r.get("action") == "EXIT_DELTA_NEUTRAL"]
+            net_pnl = sum(_safe_float(e.get("net_pnl_usd")) for e in exits) + total_funding
+
+            print(f"\nFUNDING PERFORMANCE")
+            print(f"  Funding payouts collected     : {len(payouts)}")
+            print(f"  Completed arbitrage cycles    : {len(exits)}")
+            print(f"  Total funding yield earned    : +${total_funding:.4f}")
+            print(f"  Net Arbitrage PnL (after fees): ${net_pnl:+.4f}")
+        except Exception:
+            pass
+    print(sep)
+
+
 if __name__ == "__main__":
     import sys
     # Pass --history flag (or -h) to show full per-trade breakdown
     # Usage: python3 check_pnl.py --history
     analyze_trades._show_history = "--history" in sys.argv or "-h" in sys.argv
     analyze_trades()
+    analyze_funding_arbitrage()
 
