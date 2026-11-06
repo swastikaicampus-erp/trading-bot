@@ -94,3 +94,22 @@ Lekin Futures Short hone ki wajah se har 8 ghante aapke wallet me funding fee cr
 Real Data & Results:
 Win Rate: 100% (Zero directional risk).
 Annual Return (APY): 18% se 35% APY completely passive.
+
+
+kal
+
+
+python3 check_pnl.py
+
+
+
+curl -s http://localhost:5002/strategy/status | python3 -c '
+import sys, json
+d = json.load(sys.stdin).get("data", {})
+print("Running:", d.get("running"), "| Trades Today:", d.get("trades_today"), "| Active Trades:", d.get("active_trades_count"))
+print("Open Trades:", d.get("open_trades", {}))
+print("Current Candidates:", [(c["symbol"], c["score"], c["direction"]) for c in d.get("candidates", [])])
+'
+
+
+pm2 logs delta-service --lines 30 --nostream

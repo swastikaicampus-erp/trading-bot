@@ -307,7 +307,7 @@ funding_strategy = FundingArbitrageManager(
     config={
         "dry_run": DRY_RUN,
         "capital": 100.0,
-    }
+    },
 )
 
 _last_cap_sync = 0.0
