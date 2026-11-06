@@ -1106,7 +1106,8 @@ def sync_watchlist():
     DELETE /watchlist/<symbol> route to remove something manually.
     """
     try:
-        live_symbols = discover_perpetual_futures_symbols(quote_assets=PERP_QUOTE_ASSET_FILTER)
+        blacklist = strategy.config.get('symbol_blacklist', [])
+        live_symbols = discover_perpetual_futures_symbols(quote_assets=PERP_QUOTE_ASSET_FILTER, blacklist=blacklist)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

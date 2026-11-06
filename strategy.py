@@ -137,6 +137,8 @@ DEFAULT_CONFIG = {
         "TACUSD", "ARIAUSD", "DUSKUSD", "BTWUSD",
         # Added 22-Oct-2026 based on PnL report (-$0.54 loss, 33% win rate):
         "AAOIBUSD",
+        # Added 06-Nov-2026 based on PnL report (-$1.14 on MUSD, quick SL on WLD):
+        "MUSD", "WLDUSD",
         # Added 23-Oct-2026: Illiquid stock synthetic tokens & toxic losers:
         "ORCLBUSD", "EWYBUSD", "KORUBUSD", "NMRUSD", "QNTUSD", "MSFTBUSD", "AMDBUSD",
     ],
