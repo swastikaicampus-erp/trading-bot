@@ -91,8 +91,8 @@ DEFAULT_CONFIG = {
     "vwap_filter": True,
 
     # position sizing -- risk-based (tuned for $50 USD paper trading or small account)
-    "dry_run_capital": 50.0,
-    "capital": 50.0,
+    "dry_run_capital": 100.0,
+    "capital": 100.0,
     "risk_pct": 2.5,
     "max_leverage": 2,
 
@@ -156,7 +156,7 @@ DEFAULT_CONFIG = {
     "max_daily_trades_per_symbol": 2,
     "max_daily_losses_per_symbol": 2,  # [02-Nov-2026] Relaxed 1->2 for dry-run testing phase
     # Absolute dollar loss circuit-breaker
-    "max_daily_loss": 3.0,
+    "max_daily_loss": 6.0,  # Scaled for $100 capital ($5-$6 daily cap)
     # Percentage-of-capital circuit-breaker — 5.0% for $50 capital ($2.50 daily cap = 2 losses allowed)
     "max_daily_loss_pct": 5.0,
     # Max risk cap for a single trade (3.5% of capital = $1.75 on $50 capital)
