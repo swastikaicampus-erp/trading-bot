@@ -139,6 +139,8 @@ DEFAULT_CONFIG = {
         "AAOIBUSD",
         # Added 06-Nov-2026 based on PnL report (-$1.14 on MUSD, quick SL on WLD):
         "MUSD", "WLDUSD",
+        # Added 11-Nov-2026 based on 32-trade review (-$10.53 total loss across these 4):
+        "OILUSD", "GRAMUSD", "UNIUSD", "EDENUSD",
         # Added 23-Oct-2026: Illiquid stock synthetic tokens & toxic losers:
         "ORCLBUSD", "EWYBUSD", "KORUBUSD", "NMRUSD", "QNTUSD", "MSFTBUSD", "AMDBUSD",
     ],
@@ -146,7 +148,7 @@ DEFAULT_CONFIG = {
     # minimum score threshold — [29-Oct-2026] raised 0.58→0.62
     # Higher bar = fewer but better quality setups. Caution: do NOT exceed 0.65
     # (Oct-24 report showed 0.68 caused zero trades — mathematical impossibility).
-    "min_score_threshold": 0.53,  # [08-Nov-2026] Lowered 0.58->0.53 for dry-run sample
+    "min_score_threshold": 0.56,  # [11-Nov-2026] Raised 0.53->0.56 sweet spot for high-momentum setups
 
     # portfolio-level limits — [29-Oct-2026] max_trades_per_day 4→3 (quality over quantity)
     # With higher filters (ADX 25, RSI 50, Vol 1.3x), fewer signals will qualify.
@@ -187,7 +189,7 @@ DEFAULT_CONFIG = {
     "trailing_step_pct": 0.2,
 
     # Multi-Timeframe (1-Hour) Trend Confirmation
-    "require_htf_trend": False,  # [08-Nov-2026] Temporarily False for 5m scalps,
+    "require_htf_trend": True,  # [11-Nov-2026] Re-enabled 1h HTF trend confirmation,
     "htf_ema_fast": 20,
     "htf_ema_slow": 50,
 

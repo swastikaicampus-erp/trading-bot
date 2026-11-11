@@ -47,6 +47,7 @@ DEFAULT_FUNDING_CONFIG = {
     "symbol_blacklist": [
         "VIRTUALUSD", "BASEDUSD", "MUSD", "WLDUSD", "DOODUSD",
         "TACUSD", "ARIAUSD", "DUSKUSD", "BTWUSD", "AAOIBUSD",
+        "OILUSD", "GRAMUSD", "UNIUSD", "EDENUSD",
     ],
 }
 
