@@ -1202,6 +1202,8 @@ if __name__ == "__main__":
     if AUTO_START_STRATEGY:
         strategy.start()
         print(f"[startup] Strategy scanner auto-started over {len(strategy.symbols)} symbols")
+        funding_strategy.start()
+        print("[startup] Funding Arbitrage strategy auto-started")
 
     # If HEARTBEAT_ENABLED=true in .env, assume /heartbeat/setup was
     # already called once (or config never changes) and auto-start the
